@@ -1,0 +1,7 @@
+include README.md
+include scripts/chat-sync.ps1
+recursive-include tests *.py
+include .github/workflows/ci.yml
+include .vscode/settings.json
+include .gitignore
+recursive-include src/copilot_chat_sync/web *

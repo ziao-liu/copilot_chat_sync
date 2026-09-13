@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Copilot Chat Sync</title>
+    <link rel="stylesheet" href="/style.css">
+    <script defer src="/vendor/lucide.js"></script>
+    <script defer src="/app.js"></script>
+</head>
+
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="shell">
+        <aside class="sidebar">
+            <a class="brand" href="/" aria-label="Copilot Chat Sync home">
+                <span class="brand-symbol"><i data-lucide="messages-square"></i></span>
+                <span>Copilot<span class="brand-secondary">Chat Sync</span></span>
+            </a>
+            <div class="nav-label">WORKSPACE</div>
+            <nav aria-label="Main navigation">
+                <button class="nav-item active" data-view="sync" aria-current="page"><i
+                        data-lucide="arrow-left-right"></i><span>Synchronize</span></button>
+                <button class="nav-item" data-view="conflicts"><i data-lucide="git-fork"></i><span>Conflicts</span><span
+                        class="nav-count" id="conflict-count" hidden>0</span></button>
+                <button class="nav-item" data-view="backups"><i data-lucide="archive"></i><span>Backups</span></button>
+                <button class="nav-item" data-view="settings"><i
+                        data-lucide="sliders-horizontal"></i><span>Settings</span></button>
+            </nav>
+            <div class="sidebar-bottom"><span class="connection-dot"></span><span>Loopback only</span><span
+                    id="sidebar-version">v0.1.0</span></div>
+        </aside>
+        <div class="main-shell">
+            <header class="topbar">
+                <div class="breadcrumb"><i data-lucide="folder-sync"></i><span id="group-name">Local
+                        configuration</span></div>
+                <div class="topbar-right"><span class="badge warning" id="demo-badge" hidden>DEMO / READ
+                        ONLY</span><span class="device-label"><i data-lucide="laptop"></i><span id="hostname">This
+                            device</span></span><button class="icon-button" id="refresh" title="Refresh local state"
+                        aria-label="Refresh local state"><i data-lucide="refresh-cw"></i></button></div>
+            </header>
+            <main id="main" tabindex="-1">
+                <div class="page-heading">
+                    <div>
+                        <div class="eyebrow" id="view-eyebrow">LOCAL &amp; SHARED</div>
+                        <h1 id="view-title">Synchronization</h1>
+                    </div><button class="button secondary" id="diagnostics" aria-label="Diagnostics"
+                        title="Run diagnostics"><i data-lucide="shield-check"></i><span>Diagnostics</span></button>
+                </div>
+                <div id="loading" class="loading-state" role="status"><span class="spinner"></span>Reading local state
+                </div>
+                <section id="access" class="setup-section" hidden>
+                    <i data-lucide="key-round" class="section-icon"></i>
+                    <h2>Local access required</h2>
+                    <form id="access-form"><label for="access-token">Access token</label><input id="access-token"
+                            type="password" autocomplete="off" required><button class="button primary" type="submit"><i
+                                data-lucide="arrow-right"></i>Connect</button></form>
+                </section>
+                <div id="error-banner" class="notice error" role="alert" hidden><i data-lucide="circle-alert"></i><span
+                        id="error-message"></span><button class="icon-button" id="dismiss-error" title="Dismiss error"
+                        aria-label="Dismiss error"><i data-lucide="x"></i></button></div>
+                <div id="content" hidden>
+                    <div class="status-strip"><span id="code-state" class="status-item"><i
+                                data-lucide="circle-check"></i>Checking VS Code</span><span
+                            class="status-item cloud-state"><i data-lucide="cloud"></i>Cloud delivery
+                            unverified</span><button class="text-button" id="alerts-button" hidden><i
+                                data-lucide="circle-alert"></i><span id="alert-label">Alerts</span></button></div>
+                    <section id="setup" class="setup-section" hidden>
+                        <div class="section-heading">
+                            <div><span class="section-number">01</span>
+                                <h2>Connect a shared store</h2>
+                            </div>
+                        </div>
+                        <form id="setup-form" class="setup-form">
+                            <div class="field"><label for="store-path">Shared store folder</label><input id="store-path"
+                                    spellcheck="false" placeholder="D:\OneDrive\CopilotChatSync" required></div>
+                            <div class="field"><label for="storage-path">VS Code workspace storage</label><input
+                                    id="storage-path" spellcheck="false"
+                                    placeholder="C:\Users\...\Code\User\workspaceStorage" required></div>
+                            <div class="field"><label>Local configuration</label><output id="setup-config"
+                                    class="path-output"></output></div>
+                            <div><button class="button primary" type="submit"><i data-lucide="scan-eye"></i>Preview
+                                    setup</button></div>
+                        </form>
+                    </section>
+                    <section id="view-sync" class="view" hidden>
+                        <div class="metrics">
+                            <div class="metric"><span>Shared conversations</span><strong
+                                    id="metric-sessions">0</strong><small id="metric-revisions">0 retained
+                                    revisions</small></div>
+                            <div class="metric"><span>Bound workspaces</span><strong
+                                    id="metric-workspaces">0</strong><small id="metric-hosts">0 SSH aliases</small>
+                            </div>
+                            <div class="metric"><span>Revision writers</span><strong
+                                    id="metric-writers">0</strong><small>Recorded device IDs</small></div>
+                            <div class="metric"><span>Open conflicts</span><strong
+                                    id="metric-conflicts">0</strong><small id="metric-conflict-state">No competing
+                                    histories</small></div>
+                        </div>
+                        <div class="workspace-layout">
+                            <section class="workspace-section">
+                                <div class="section-heading">
+                                    <h2>Workspaces <span id="workspace-total" class="muted-count">0</span></h2><button
+                                        class="text-button" id="manage-workspaces"><i
+                                            data-lucide="list-filter"></i>Manage scope</button>
+                                </div>
+                                <div class="filter-row">
+                                    <div class="search-field"><i data-lucide="search"></i><input id="workspace-search"
+                                            type="search" aria-label="Filter workspaces"
+                                            placeholder="Filter host or folder"></div><select id="workspace-filter"
+                                        aria-label="Workspace binding filter">
+                                        <option value="all">All workspaces</option>
+                                        <option value="bound">Bound only</option>
+                                        <option value="unbound">Not bound</option>
+                                    </select>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="workspace-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="check-cell"><input id="select-all" type="checkbox"
+                                                        aria-label="Select all visible bound workspaces"></th>
+                                                <th>Host / folder</th>
+                                                <th class="numeric">Chats</th>
+                                                <th class="numeric">Indexed</th>
+                                                <th>State</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="workspace-rows"></tbody>
+                                    </table>
+                                </div>
+                                <div id="workspace-empty" class="empty-state" hidden><i data-lucide="folder-search"></i>
+                                    <h3>No matching workspaces</h3><button id="clear-filter" class="text-button">Clear
+                                        filters</button>
+                                </div>
+                                <div class="table-footer"><span id="selection-count">0 selected</span><span
+                                        id="scan-time">Not refreshed</span></div>
+                            </section>
+                            <aside class="handoff">
+                                <div class="section-heading">
+                                    <h2>Handoff</h2><i data-lucide="arrow-up-down" class="muted"></i>
+                                </div>
+                                <div class="segmented" aria-label="Handoff direction"><button data-mode="push"
+                                        class="selected" aria-pressed="true"><i
+                                            data-lucide="upload"></i>Push</button><button data-mode="pull"
+                                        aria-pressed="false"><i data-lucide="download"></i>Pull</button></div>
+                                <div class="transfer-route"><span><i id="route-source-icon"
+                                            data-lucide="laptop"></i><span id="route-source">This device</span></span><i
+                                        data-lucide="arrow-right"></i><span><i id="route-target-icon"
+                                            data-lucide="cloud"></i><span id="route-target">Shared store</span></span>
+                                </div>
+                                <div class="handoff-selection"><strong id="handoff-count">0</strong><span>workspaces
+                                        selected</span></div>
+                                <label class="checkbox-row" id="detach-row" hidden><input id="detach"
+                                        type="checkbox"><span>Quarantine editing snapshots<span class="warning-text">Old
+                                            undo / checkpoints removed from use</span></span></label>
+                                <button id="preview-handoff" class="button primary full-width"><i
+                                        data-lucide="scan-eye"></i><span>Preview push</span></button>
+                                <div class="local-write-state" id="write-state"><i
+                                        data-lucide="lock-keyhole"></i><span>Confirmation required</span></div>
+                                <div class="maintenance">
+                                    <div class="nav-label">MAINTENANCE</div><button class="text-button"
+                                        id="preview-repair"><i data-lucide="wrench"></i>Repair indexes</button><button
+                                        class="text-button" id="preview-migrate"><i data-lucide="unlink"></i>Migrate old
+                                        links</button>
+                                </div>
+                            </aside>
+                        </div>
+                        <section class="activity-section">
+                            <div class="section-heading">
+                                <h2>Recent operations</h2><span class="small muted">This panel session</span>
+                            </div>
+                            <div id="activity-list"></div>
+                        </section>
+                    </section>
+                    <section id="view-conflicts" class="view" hidden>
+                        <div class="section-heading">
+                            <h2>Competing histories</h2><span class="small muted" id="conflict-total"></span>
+                        </div>
+                        <div id="conflict-list"></div>
+                    </section>
+                    <section id="view-backups" class="view" hidden>
+                        <div class="section-heading">
+                            <h2>Local recovery snapshots</h2><span class="small muted" id="backup-total"></span>
+                        </div>
+                        <div id="backup-list"></div>
+                    </section>
+                    <section id="view-settings" class="view" hidden>
+                        <section class="settings-section">
+                            <div class="section-heading">
+                                <h2>Local configuration</h2><button id="settings-scope" class="button secondary"><i
+                                        data-lucide="list-filter"></i>Manage scope</button>
+                            </div>
+                            <dl id="config-details" class="config-details"></dl>
+                        </section>
+                        <section class="settings-section">
+                            <div class="section-heading">
+                                <h2>Revision writers</h2><span class="small muted">Not a live device list</span>
+                            </div>
+                            <div id="writers-list"></div>
+                        </section>
+                    </section>
+                </div>
+                <footer class="page-footer"><span>Copilot Chat Sync <span
+                            id="footer-version">0.1.0</span></span><span>Legacy sessions <span
+                            class="separator">/</span> Local-first <span class="separator">/</span> Pre-release</span>
+                </footer>
+            </main>
+        </div>
+    </div>
+    <dialog id="modal" aria-labelledby="modal-title">
+        <div class="modal-header">
+            <div><span class="eyebrow" id="modal-eyebrow">REVIEW</span>
+                <h2 id="modal-title"></h2>
+            </div><button class="icon-button" id="modal-close" title="Close dialog" aria-label="Close dialog"><i
+                    data-lucide="x"></i></button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div id="modal-actions" class="modal-actions"></div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+
+</html>

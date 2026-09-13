@@ -1,0 +1,11 @@
+Offline UI dependencies
+
+lucide 0.468.0
+https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js
+License: ISC (see lucide-LICENSE)
+
+@fontsource/ibm-plex-sans 5.2.5
+https://unpkg.com/@fontsource/ibm-plex-sans@5.2.5/files/ibm-plex-sans-latin-400-normal.woff2
+License: OFL-1.1 (see plex-LICENSE)
+
+Assets are served locally. No CDN requests occur when using the panel.
