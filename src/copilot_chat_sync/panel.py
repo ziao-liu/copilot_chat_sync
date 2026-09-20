@@ -15,7 +15,7 @@ import time
 import tempfile
 import uuid
 import webbrowser
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -440,7 +440,7 @@ def demo_config(root: Path) -> Path:
         chats.mkdir(parents=True)
         uri = f"vscode-remote://ssh-remote%2B{host}/home/demo/{folder}"
         (directory / "workspace.json").write_bytes(canonical_bytes({"folder": uri}))
-        with sqlite3.connect(directory / "state.vscdb") as connection:
+        with closing(sqlite3.connect(directory / "state.vscdb")) as connection, connection:
             connection.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value BLOB)")
         local = {data["sessionId"]: data for data in sessions[:(8 if number < 2 else 5)]}
         for data in local.values():

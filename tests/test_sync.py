@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -119,12 +120,12 @@ class SyncTests(unittest.TestCase):
         push(self.configs[0], apply=True)
         before = read_keys(self.workspaces[1].database)
         result = pull(self.configs[1], apply=True)
-        with sqlite3.connect(self.workspaces[1].database) as connection:
+        with closing(sqlite3.connect(self.workspaces[1].database)) as connection, connection:
             connection.execute("UPDATE ItemTable SET value='new unrelated value' WHERE key='unrelated.extension'")
         restore(self.configs[1], result["backup"], apply=True)
         self.assertEqual(read_keys(self.workspaces[1].database), before)
         self.assertFalse((self.workspaces[1].chats / (SID + ".jsonl")).exists())
-        with sqlite3.connect(self.workspaces[1].database) as connection:
+        with closing(sqlite3.connect(self.workspaces[1].database)) as connection, connection:
             self.assertEqual(connection.execute("SELECT value FROM ItemTable WHERE key='unrelated.extension'").fetchone()[0], "new unrelated value")
 
     def test_restore_refuses_newer_edits(self):

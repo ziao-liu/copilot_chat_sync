@@ -102,7 +102,7 @@ class CliTests(unittest.TestCase):
         config = Config(self.config, self.root / "cloud", self.storage, bindings=[{"id": WID, "uri": URI}])
         config.save()
         Store(config.store).initialize()
-        with sqlite3.connect(self.storage / WID / "state.vscdb") as connection:
+        with contextlib.closing(sqlite3.connect(self.storage / WID / "state.vscdb")) as connection, connection:
             connection.execute("INSERT INTO ItemTable VALUES (?,?)", ("chat.ChatSessionStore.index", '{"version":2,"entries":{}}'))
         with patch("copilot_chat_sync.cli.code_processes", return_value=[]):
             code, output, errors = self.run_cli("doctor")

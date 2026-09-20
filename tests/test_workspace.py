@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ def make_workspace(storage, identifier=WID, uri=URI):
     directory = storage / identifier
     directory.mkdir(parents=True)
     (directory / "workspace.json").write_text(json.dumps({"folder": uri}))
-    with sqlite3.connect(directory / "state.vscdb") as connection:
+    with closing(sqlite3.connect(directory / "state.vscdb")) as connection, connection:
         connection.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value BLOB)")
         connection.execute("INSERT INTO ItemTable VALUES ('unrelated.extension', 'preserve me')")
     return Workspace.open(storage, identifier)
@@ -31,6 +32,22 @@ class WorkspaceTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.storage = self.root / "storage"
         self.workspace = make_workspace(self.storage)
+
+    def test_fixture_closes_database_connection(self):
+        connections = []
+        open_database = sqlite3.connect
+
+        def track_connection(*args, **kwargs):
+            connection = open_database(*args, **kwargs)
+            connections.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+
+        with patch("test_workspace.sqlite3.connect", side_effect=track_connection):
+            make_workspace(self.storage, WID + "-1")
+        self.assertEqual(len(connections), 1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connections[0].execute("SELECT 1")
 
     def test_discovery_uses_real_metadata_and_suffix_ids(self):
         make_workspace(self.storage, WID + "-1", "vscode-remote://ssh-remote+npu-server/home/alice/PROJECT")
@@ -73,7 +90,7 @@ class WorkspaceTests(unittest.TestCase):
         before = read_keys(self.workspace.database)
         after = merge_keys(before, {SID: normalize(sample(), SID)})
         write_keys(self.workspace.database, before, after)
-        with sqlite3.connect(self.workspace.database) as connection:
+        with closing(sqlite3.connect(self.workspace.database)) as connection, connection:
             self.assertEqual(connection.execute("SELECT value FROM ItemTable WHERE key='unrelated.extension'").fetchone()[0], "preserve me")
         state = json.loads(after[STATE_CACHE])
         state[0]["archived"] = True

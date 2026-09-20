@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -194,7 +195,21 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.request("/../config.json")[0], 404)
 
     def test_demo_fixtures_are_isolated_and_include_conflict_and_backups(self):
-        demo_path = demo_config(self.root / "demo")
+        connections = []
+        open_database = sqlite3.connect
+
+        def track_connection(*args, **kwargs):
+            connection = open_database(*args, **kwargs)
+            connections.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+
+        with patch("copilot_chat_sync.panel.sqlite3.connect", side_effect=track_connection):
+            demo_path = demo_config(self.root / "demo")
+        self.assertTrue(connections)
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
         self.assertTrue(demo_path.is_relative_to(self.root / "demo"))
         with patch("copilot_chat_sync.panel.code_processes", return_value=[]), patch("copilot_chat_sync.cli.code_processes", return_value=[]):
             snapshot = Panel(demo_path, demo=True).snapshot()
