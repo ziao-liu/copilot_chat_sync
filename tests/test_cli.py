@@ -75,6 +75,22 @@ class CliTests(unittest.TestCase):
                 dispatch.assert_called_once_with(arguments)
                 self.assertEqual(stopped.exception.code, 3)
 
+    def test_installer_subprocess_drops_incompatible_powershell_module_path(self):
+        scripts = Path(__file__).resolve().parents[1] / "scripts"
+        with patch.object(sys, "path", [str(scripts), *sys.path]):
+            install = runpy.run_path(str(scripts / "build_windows.py"))["installer_process"]
+        for module_key in ("PSModulePath", "PSMODULEPATH", "psmodulepath"):
+            with self.subTest(module_key=module_key):
+                with patch.dict(os.environ, {module_key: "core-only", "PATH": "unchanged"}, clear=True):
+                    with patch("subprocess.run") as launch:
+                        install(Path("Setup.exe"), ["/VERYSILENT"])
+                    child = launch.call_args.kwargs["env"]
+                    self.assertNotIn("PSMODULEPATH", {key.upper() for key in child})
+                    self.assertEqual(child["PATH"], "unchanged")
+                    self.assertEqual(child["CCS_INSTALLER"], "Setup.exe")
+                    self.assertEqual(child["CCS_INSTALL_ARGS"], "/VERYSILENT")
+                    self.assertEqual(os.environ[module_key], "core-only")
+
     def test_bundle_smoke_checks_source_process_in_isolation(self):
         root = Path(__file__).resolve().parents[1]
         smoke = runpy.run_path(str(root / "scripts/smoke_bundle.py"))["smoke"]

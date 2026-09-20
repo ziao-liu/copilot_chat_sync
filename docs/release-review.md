@@ -11,6 +11,8 @@ The packaging follow-up includes the original upstream license omitted from the
 exact dependency version. All four files in that follow-up were reviewed, including
 the three excluded by OCR. Runtime bootstrapper downloads use non-interactive basic
 parsing and report PowerShell failures without removing the signature requirement.
+Windows PowerShell child processes do not inherit PowerShell Core module paths;
+a regression covers environment-key casing and preservation of the parent process.
 
 The original startup failure was reproduced with an OSError carrying WinError 448.
 Linked chat targets are no longer opened by normal scan/status; inaccessible workspaces
@@ -24,7 +26,7 @@ window, with no Python file-operation API exposed to JavaScript. Window close is
 blocked during operations, server threads are joined on shutdown, file URLs are
 disabled, and unsupported legacy renderers are rejected. The console CLI is separate.
 
-Local validation: 81 tests, 78 passed and 3 Windows-only skipped; frontend hierarchy
+Local validation: 82 tests, 79 passed and 3 Windows-only skipped; frontend hierarchy
 checks passed. Windows packaging must additionally verify GUI PE subsystem, actual
 WebView2 rendering, fonts/icons, nonblank screenshot, clean process exit and the
 installed app before publication. The bundled runtime bootstrapper must have a valid

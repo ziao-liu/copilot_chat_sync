@@ -20,7 +20,8 @@ from smoke_bundle import smoke, smoke_desktop
 
 
 def installer_process(executable: Path, arguments: list[str]) -> None:
-    environment = dict(os.environ, CCS_INSTALLER=str(executable), CCS_INSTALL_ARGS=subprocess.list2cmdline(arguments))
+    environment = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+    environment.update(CCS_INSTALLER=str(executable), CCS_INSTALL_ARGS=subprocess.list2cmdline(arguments))
     script = "$ErrorActionPreference='Stop'; $process = Start-Process -FilePath $env:CCS_INSTALLER -ArgumentList $env:CCS_INSTALL_ARGS -Wait -PassThru; exit $process.ExitCode"
     subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                    env=environment, check=True, timeout=180)
@@ -130,7 +131,8 @@ def main() -> None:
         smoke([str(extracted / "CopilotChatSync/CopilotChatSync-CLI.exe")], version)
         smoke_desktop(extracted / "CopilotChatSync/CopilotChatSync.exe", version, output / f"CopilotChatSync-{version}-desktop.png")
     bootstrapper = root / "build/MicrosoftEdgeWebview2Setup.exe"
-    environment = dict(os.environ, CCS_BOOTSTRAPPER=str(bootstrapper))
+    environment = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
+    environment["CCS_BOOTSTRAPPER"] = str(bootstrapper)
     download = "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $env:CCS_BOOTSTRAPPER; $signature=Get-AuthenticodeSignature -LiteralPath $env:CCS_BOOTSTRAPPER; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation') { throw 'WebView2 bootstrapper does not have a valid Microsoft signature' }"
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", download],
                             env=environment, capture_output=True, text=True, timeout=120)
