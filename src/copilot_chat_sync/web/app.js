@@ -95,7 +95,7 @@ function workspaceTree(workspaces) {
 }
 
 function workspaceSelection(workspaces, selection, field) {
-    const ids = workspaces.filter((workspace) => field === "select" ? workspace.bound && !workspace.missing : !workspace.missing || selection.has(workspace.id)).map((workspace) => workspace.id);
+    const ids = workspaces.filter((workspace) => field === "select" ? workspace.bound && !workspace.missing && !workspace.scan_error : !workspace.missing || selection.has(workspace.id)).map((workspace) => workspace.id);
     const selected = ids.filter((identifier) => selection.has(identifier)).length;
     return { ids, checked: ids.length > 0 && selected === ids.length, partial: selected > 0 && selected < ids.length, disabled: !ids.length };
 }
@@ -177,7 +177,7 @@ async function task(work) {
 async function loadState() {
     const snapshot = await api("/api/state");
     state.snapshot = snapshot;
-    const bound = snapshot.workspaces.filter((workspace) => workspace.bound && !workspace.missing).map((workspace) => workspace.id);
+    const bound = snapshot.workspaces.filter((workspace) => workspace.bound && !workspace.missing && !workspace.scan_error).map((workspace) => workspace.id);
     state.selected = state.selected === null ? new Set(bound) : new Set([...state.selected].filter((identifier) => bound.includes(identifier)));
     byId("loading").hidden = true;
     byId("access").hidden = true;
@@ -267,11 +267,13 @@ function workspaceTreeMarkup(workspaces, selection, field) {
         const parts = workspaceParts(workspace);
         let status = "";
         if (workspace.missing) status = badge("Unavailable", "danger");
+        else if (workspace.scan_error) status = `<span title="${escapeHtml(workspace.scan_error)}">${badge("Cannot read", "danger")}</span>`;
         else if (detailed && !workspace.bound) status = badge("Not selected");
         else if (workspace.linked) status = badge("Old link", "warning");
         else if (workspace.editing_snapshots) status = badge("Snapshots", "warning");
         else if (detailed) status = badge("Ready", "good");
-        const metadata = detailed ? `<span class="tree-number" data-label="Chats">${number(workspace.sessions)}</span><span class="tree-number" data-label="Indexed">${workspace.indexed === undefined ? "-" : number(workspace.indexed)}</span><span class="tree-status">${status}</span>` : `<span class="tree-chat-count">${number(workspace.sessions)} chats</span>${status}`;
+        const chats = workspace.sessions == null ? "-" : number(workspace.sessions);
+        const metadata = detailed ? `<span class="tree-number" data-label="Chats">${chats}</span><span class="tree-number" data-label="Indexed">${workspace.indexed === undefined ? "-" : number(workspace.indexed)}</span><span class="tree-status">${status}</span>` : `<span class="tree-chat-count">${chats} chats</span>${status}`;
         return `<li><label class="tree-row tree-leaf tree-level-${Math.min(depth, 4)}" title="${escapeHtml(workspace.uri)}"><span class="tree-spacer"></span><input type="checkbox" data-${field}="${escapeHtml(workspace.id)}" aria-label="Select ${escapeHtml(parts.host)} ${escapeHtml(parts.path)}${duplicate ? " " + escapeHtml(workspace.id) : ""}" ${selection.has(workspace.id) ? "checked" : ""}>${icon("folder")}<span class="tree-name"><strong>${escapeHtml(label)}</strong>${duplicate ? `<small>${escapeHtml(workspace.id)}</small>` : ""}</span><span class="tree-meta">${metadata}</span></label></li>`;
     }
     function branch(node, depth, host) {

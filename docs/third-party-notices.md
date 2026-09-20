@@ -10,7 +10,14 @@ Copilot Chat Sync is MIT-licensed. Bundled components keep their own licenses:
 | Lucide 0.468.0                 | ISC                                                     | `licenses/lucide-LICENSE`     |
 | IBM Plex Sans                  | SIL Open Font License 1.1                               | `licenses/plex-LICENSE`       |
 
-The Windows build collects the Python, psutil and PyInstaller license files from
+The Windows desktop also bundles pywebview (BSD-3-Clause), pythonnet and clr_loader
+(MIT), cffi (MIT), pycparser (BSD), Bottle (MIT), proxy_tools (BSD) and
+typing_extensions (PSF). Their actual distribution licenses are copied under
+`licenses/<package>/`. The WebView2 SDK and Runtime remain Microsoft components
+under their own distribution terms. The runtime bootstrapper is Microsoft-signed;
+that signature does not sign Copilot Chat Sync itself.
+
+The Windows build collects the Python and bundled package license files from
 the actual build environment. `BUILD_INFO.json` records their versions and the
 source commit. Vendored font/icon sources are listed in `licenses/SOURCES.txt`.
 

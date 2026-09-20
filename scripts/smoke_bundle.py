@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import queue
+import shutil
+import struct
 import subprocess
 import tempfile
 import threading
@@ -14,6 +16,43 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
+
+
+def smoke_desktop(executable: Path, version: str, screenshot: Path) -> None:
+    from PIL import Image
+    binary = executable.read_bytes()
+    offset = struct.unpack_from("<I", binary, 0x3c)[0]
+    if binary[:2] != b"MZ" or struct.unpack_from("<H", binary, offset + 24 + 68)[0] != 2:
+        raise RuntimeError("Desktop executable must use the Windows GUI subsystem, without a console")
+    with tempfile.TemporaryDirectory(prefix="chat-sync-native-smoke-") as temporary:
+        root = Path(temporary)
+        environment = dict(os.environ)
+        for name in ("PYTHONPATH", "PYTHONHOME"):
+            environment.pop(name, None)
+        for name in ("LOCALAPPDATA", "APPDATA", "XDG_CONFIG_HOME", "OneDrive", "OneDriveConsumer", "OneDriveCommercial", "TMP", "TEMP", "TMPDIR"):
+            directory = root / name
+            directory.mkdir()
+            environment[name] = str(directory)
+        environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+        report = root / "desktop.json"
+        process = subprocess.Popen([str(executable.resolve()), "--demo", "--smoke-test", str(report)], cwd=root, env=environment)
+        try:
+            code = process.wait(timeout=150)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+        result = json.loads(report.read_text(encoding="utf-8")) if report.is_file() else {"error": "No desktop report was produced"}
+        if code or result.get("error") or result.get("version") != version or result.get("renderer") != "edgechromium":
+            raise RuntimeError("Native desktop smoke failed: " + str(result))
+        image_path = report.with_suffix(".png")
+        with Image.open(image_path) as image:
+            extrema = image.convert("RGB").getextrema()
+            if image.width < 600 or image.height < 400 or max(high - low for low, high in extrema) < 50:
+                raise RuntimeError("Native desktop screenshot is blank or incorrectly sized")
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(image_path, screenshot)
+    print("Native desktop smoke passed: GUI subsystem, WebView2, authenticated UI, fonts/icons, screenshot and clean exit.")
 
 
 def smoke(command: list[str], version: str) -> None:

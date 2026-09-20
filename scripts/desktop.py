@@ -1,7 +1,7 @@
 import sys
 
-from copilot_chat_sync.cli import main
+from copilot_chat_sync.desktop import main
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:] or ["panel"]))
+    raise SystemExit(main(sys.argv[1:]))

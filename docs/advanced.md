@@ -26,7 +26,9 @@ case-sensitive remote paths are not automatically paired or rewritten.
 ## Command-Line Setup
 
 The Windows release includes Python and `psutil`; run `CopilotChatSync.exe` without
-arguments to open the panel, or pass the same CLI arguments shown below.
+arguments to open the native WebView2 application window. Use `CopilotChatSync-CLI.exe`
+for the CLI arguments shown below. The browser panel remains available via the CLI's
+`panel` command. Desktop startup failures appear in a native error dialog.
 Source installs need Python 3.10+: `python -m pip install .` installs the package
 and its runtime dependency. Use an external terminal on the desktop running VS Code,
 not the SSH server's terminal.
@@ -275,9 +277,10 @@ python -m pip install -r packaging/requirements-windows.txt
 python scripts/build_windows.py
 ```
 
-The build creates a portable ZIP, per-user Setup.exe and SHA256SUMS.txt under
+The build creates a portable ZIP, per-user Setup.exe, desktop screenshot and SHA256SUMS.txt under
 `dist/release`. It runs the actual portable and installed executables with isolated
-demo data and no Python on PATH, checks packaged resources and API protections, then
+demo data and no Python on PATH, checks packaged resources and API protections,
+opens the actual WebView2 window, verifies its rendered state and screenshot, then
 uninstalls and verifies a marker in the real default data folder survives. It refuses
 to run the installer test on an account with an existing installation or data folder.
 Use a disposable build account; the test creates/removes a Start menu entry.
@@ -285,7 +288,9 @@ Use a disposable build account; the test creates/removes a Start menu entry.
 Tag `vX.Y.Z` must match the package and runtime versions. The release workflow reruns
 the whole test matrix and Windows build, verifies artifact hashes and publishes only
 after success. Releases are marked prerelease. No signing certificate is configured;
-SmartScreen warnings may occur. The console must stay open while using the panel.
+SmartScreen warnings may occur. The desktop EXE uses the Windows GUI subsystem;
+the separate CLI keeps its console. Closing the desktop window stops the local server,
+and closing during an active operation is blocked. See [Windows help](windows-help.md).
 
 The project includes the official [OpenCodeReview delegation skill](../.github/skills/open-code-review-delegate/ORIGIN.md).
 It is a development-only review aid, not an application dependency. Delegation mode

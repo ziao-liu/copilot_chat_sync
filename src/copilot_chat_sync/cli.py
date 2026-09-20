@@ -71,12 +71,17 @@ def _scan(storage: Path) -> dict:
     workspaces, issues = discover(storage)
     rows = []
     for workspace in workspaces:
+        row = {"id": workspace.identifier, "uri": workspace.uri, "sessions": None, "linked": False}
+        rows.append(row)
         try:
-            files = workspace.session_files(allow_redirect=True)
-            rows.append({"id": workspace.identifier, "uri": workspace.uri, "sessions": len(files),
-                         "linked": is_redirect(workspace.chats)})
-        except SyncError as error:
-            issues.append(str(error))
+            row["linked"] = is_redirect(workspace.chats)
+            if row["linked"]:
+                issues.append(f"{workspace.identifier}: old chatSessions link detected; target was not opened. Review migration before syncing.")
+                continue
+            row["sessions"] = len(workspace.session_files())
+        except (SyncError, OSError) as error:
+            row["scan_error"] = f"Cannot read {workspace.chats}: {error}"
+            issues.append(row["scan_error"])
     return {"storage": str(storage), "workspaces": rows, "issues": issues}
 
 
@@ -88,17 +93,20 @@ def _status(config: Config, doctor: bool) -> dict:
         running = []
         issues.append(str(error))
     for workspace in config.workspaces():
+        row = {"id": workspace.identifier, "uri": workspace.uri, "sessions": None, "linked": False}
+        rows.append(row)
         try:
             linked = is_redirect(workspace.chats)
-            files = workspace.session_files(allow_redirect=True)
+            row["linked"] = linked
+            if linked:
+                issues.append(f"{workspace.identifier}: old chatSessions link detected; target was not opened. Review migration before syncing.")
+                continue
+            files = workspace.session_files()
             keys = read_keys(workspace.database)
             merge_keys(keys, {})
             index = json_loads(keys[INDEX]) if keys[INDEX] else {"entries": {}}
             editing = [identifier for identifier in files if workspace.editing_state(identifier)]
-            rows.append({"id": workspace.identifier, "uri": workspace.uri, "sessions": len(files),
-                         "indexed": len(index.get("entries", {})), "linked": linked, "editing_snapshots": len(editing)})
-            if linked:
-                issues.append(f"{workspace.identifier}: migrate old junction before push/pull")
+            row.update({"sessions": len(files), "indexed": len(index.get("entries", {})), "editing_snapshots": len(editing)})
             if editing:
                 issues.append(f"{workspace.identifier}: editing snapshots may restore old buffers; pull/repair requires explicit quarantine")
             if doctor:
@@ -106,7 +114,8 @@ def _status(config: Config, doctor: bool) -> dict:
                     from .sessions import load_session
                     load_session(path)
         except (SyncError, ValueError, OSError) as error:
-            issues.append(str(error))
+            row["scan_error"] = f"Cannot inspect {workspace.directory}: {error}"
+            issues.append(row["scan_error"])
     shared = {}
     try:
         store = Store(config.store).load()

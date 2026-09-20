@@ -55,6 +55,9 @@ context.applyWorkspaceSelection(workspaces, selection, ["five"], false, "scope")
 assert(!selection.has("five"));
 assert.strictEqual(context.workspaceSelection([workspaces[4]], selection, "scope").disabled, true);
 
+const unreadable = { ...workspaces[0], sessions: null, scan_error: "[WinError 448]" };
+assert.strictEqual(context.workspaceSelection([unreadable], new Set(), "select").disabled, true);
+
 context.document = { getElementById: () => ({ value: "" }) };
 context.state = { collapsed: new Set() };
 vm.runInContext(source.slice(source.indexOf("const byId ="), source.indexOf("const storageKey =")), context);
@@ -66,5 +69,8 @@ assert(markup.includes("Workspace 1") && markup.includes("Workspace 2"));
 const escaped = context.workspaceTreeMarkup([{ id: "escaped", uri: "vscode-remote://ssh-remote%2Batlas/home/demo/%3Cb%3Eproject%3C%2Fb%3E" }], new Set(), "scope");
 assert(escaped.includes("&lt;b&gt;project&lt;/b&gt;"));
 assert(!escaped.includes("<b>project</b>"));
+const blockedMarkup = context.workspaceTreeMarkup([unreadable], new Set(), "select");
+assert(blockedMarkup.includes("Cannot read"));
+assert(blockedMarkup.includes('data-label="Chats">-</span>'));
 
 console.log("Workspace tree tests passed: hierarchy, identity, sorting, duplicates, encoded paths, scoped selection, unavailable workspaces and escaped rendering.");

@@ -1,7 +1,7 @@
 # Copilot Chat Sync
 
 Move **legacy VS Code Copilot chats** between computers through OneDrive or another
-synced folder. A local browser panel handles setup, transfers, conflicts and backups.
+synced folder. A Windows desktop app handles setup, transfers, conflicts and backups.
 
 **Run it on each desktop computer, not your SSH servers.**
 
@@ -14,14 +14,16 @@ synced folder. A local browser panel handles setup, transfers, conflicts and bac
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.0)
-  and download `CopilotChatSync-0.1.0-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.1)
+  and download `CopilotChatSync-0.1.1-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
-3. Your browser opens the local panel. Keep its console window running; `Ctrl+C` stops it.
+3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
 Prefer no installer? Download the portable ZIP, extract the **whole folder**, and
-open `CopilotChatSync.exe`. Keep `_internal` beside it. The binaries are unsigned;
-Windows may show a SmartScreen warning. Release assets include SHA256 checksums.
+open `CopilotChatSync.exe`. Keep all extracted files together. Microsoft WebView2
+Runtime is required; Setup offers to install the Microsoft-signed runtime if missing.
+Our binaries are still unsigned and may show a SmartScreen warning. See
+[Windows trust and old links](docs/windows-help.md); SHA256 is not a signature.
 
 <details>
 <summary>Source install (Python 3.10+, Linux/macOS or development)</summary>
@@ -84,7 +86,7 @@ Conflicting versions are kept for review, not silently overwritten or combined.
 From the portable folder, preview without touching your chats:
 
 ```powershell
-.\CopilotChatSync.exe panel --demo
+.\CopilotChatSync.exe --demo
 ```
 
 To update, close the app and install/extract the new release. Uninstalling keeps

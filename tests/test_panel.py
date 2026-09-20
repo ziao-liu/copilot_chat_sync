@@ -122,6 +122,51 @@ class PanelTests(unittest.TestCase):
                 with self.panel.exclusive():
                     self.fail("Concurrent operation was allowed")
 
+    def test_state_does_not_open_old_chat_links(self):
+        with patch("copilot_chat_sync.cli.is_redirect", return_value=True):
+            with patch("copilot_chat_sync.workspace.Workspace.session_files", side_effect=PermissionError("[WinError 448]")) as sessions:
+                status, snapshot = self.request("/api/state")
+        self.assertEqual(status, 200, snapshot)
+        sessions.assert_not_called()
+        self.assertTrue(snapshot["workspaces"][0]["linked"])
+        self.assertIsNone(snapshot["workspaces"][0]["sessions"])
+
+    def test_state_keeps_unreadable_workspace_as_a_warning(self):
+        with patch("copilot_chat_sync.workspace.Workspace.session_files", side_effect=OSError("[WinError 448]")):
+            status, snapshot = self.request("/api/state")
+        self.assertEqual(status, 200, snapshot)
+        self.assertIn("448", snapshot["workspaces"][0]["scan_error"])
+        self.assertTrue(snapshot["issues"])
+
+    def test_binding_removal_never_stamps_chat_contents(self):
+        with patch("copilot_chat_sync.panel.os.walk", side_effect=AssertionError("Chat contents were traversed")):
+            status, plan = self.request("/api/preview", {"action": "bindings", "workspaces": []})
+        self.assertEqual(status, 200, plan)
+
+    def test_unselected_workspace_does_not_block_preview(self):
+        other = make_workspace(self.config.storage, WID + "-1")
+        self.config.bindings.append({"id": other.identifier, "uri": other.uri})
+        self.config.save()
+        walk = os.walk
+
+        def restricted_walk(path, *args, **kwargs):
+            if Path(path).is_relative_to(other.directory):
+                raise OSError("[WinError 448] unselected old mount")
+            return walk(path, *args, **kwargs)
+
+        with patch("copilot_chat_sync.panel.os.walk", side_effect=restricted_walk):
+            self.preview()
+
+    def test_mount_point_preview_error_explains_no_writes(self):
+        error = OSError("untrusted mount point")
+        error.winerror = 448
+        with patch.object(self.panel, "_stamp", side_effect=error):
+            status, result = self.request("/api/preview", {"action": "migrate", "workspaces": [WID]})
+        self.assertEqual(status, 400)
+        self.assertIn("WinError 448", result["error"])
+        self.assertIn("No changes were applied", result["error"])
+        self.assertIsNone(self.panel.plan)
+
     def test_setup_and_unbound_snapshot_work_without_native_chats(self):
         self.panel.config_path = self.root / "new-control/config.json"
         with patch("copilot_chat_sync.panel.code_processes", return_value=[]):

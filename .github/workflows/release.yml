@@ -39,7 +39,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_TAG" artifacts/*.exe artifacts/*.zip artifacts/SHA256SUMS.txt \
+          gh release create "$RELEASE_TAG" artifacts/*.exe artifacts/*.zip artifacts/*.png artifacts/SHA256SUMS.txt \
             --verify-tag --draft --prerelease --title "Copilot Chat Sync $RELEASE_TAG (Windows preview)" \
             --notes-file docs/release-notes.md
           gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false

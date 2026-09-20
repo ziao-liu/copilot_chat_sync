@@ -151,10 +151,14 @@ class Panel:
         else:
             config = Config.load(self.config_path)
             paths.extend([config.state_path, config.store / "format.json"])
-            trees.append(config.store / "revisions")
-            selected = set(options.get("workspaces", [])) | {binding["id"] for binding in config.bindings}
+            if options["action"] != "bindings":
+                trees.append(config.store / "revisions")
+            selected = set(options["workspaces"]) if "workspaces" in options else {binding["id"] for binding in config.bindings}
             for identifier in sorted(selected):
                 directory = config.storage / identifier
+                if options["action"] == "bindings":
+                    paths.append(directory / "workspace.json")
+                    continue
                 paths.extend(directory / name for name in ("workspace.json", "state.vscdb", "state.vscdb-wal", "state.vscdb-shm"))
                 trees.extend(directory / name for name in ("chatSessions", "chatEditingSessions"))
             if options["action"] == "restore":
@@ -244,10 +248,15 @@ class Panel:
     def preview(self, data: object) -> dict:
         options = _options(data)
         self.plan = None
-        before = self._stamp(options)
-        result = self._execute(options, False)
-        if self._stamp(options) != before:
-            raise PanelError("Files changed during preview. Refresh and preview again.", 409)
+        try:
+            before = self._stamp(options)
+            result = self._execute(options, False)
+            if self._stamp(options) != before:
+                raise PanelError("Files changed during preview. Refresh and preview again.", 409)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 448:
+                raise PanelError("Windows blocked an untrusted mount point (WinError 448). No changes were applied. Stop old sync/link scripts and back up the original chats. The old link must be replaced with a normal local folder before it can be used; do not disable Windows mount-point protection. " + str(error)) from error
+            raise
         identifier = secrets.token_urlsafe(24)
         self.plan = {"id": identifier, "options": options, "stamp": before, "result": result,
                      "expires": time.monotonic() + PLAN_TTL}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-chat-sync"
-version = "0.1.0"
+version = "0.1.1"
 description = "Conservative, offline-first synchronization of legacy VS Code Copilot chats"
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,9 @@ classifiers = [
 
 [project.scripts]
 copilot-chat-sync = "copilot_chat_sync.cli:main"
+
+[project.optional-dependencies]
+desktop = ["pywebview==6.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

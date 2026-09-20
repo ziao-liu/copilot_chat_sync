@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from copilot_chat_sync.safety import code_processes, is_redirect, local_lock, plain_path
+from copilot_chat_sync import __version__
 from copilot_chat_sync.sessions import SyncError, native_bytes, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.sync import migrate
@@ -83,7 +84,7 @@ class WindowsTests(unittest.TestCase):
         prefix = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-PythonExecutable", sys.executable]
         success = subprocess.run([*prefix, "--version"], capture_output=True, text=True)
         self.assertEqual(success.returncode, 0, success.stdout + success.stderr)
-        self.assertIn("0.1.0", success.stdout)
+        self.assertIn(__version__, success.stdout)
         failure = subprocess.run([*prefix, "not-a-command"], capture_output=True, text=True)
         self.assertNotEqual(failure.returncode, 0)
 

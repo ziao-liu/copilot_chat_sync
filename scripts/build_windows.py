@@ -16,7 +16,7 @@ import zipfile
 from importlib.metadata import distribution
 from pathlib import Path
 
-from smoke_bundle import smoke
+from smoke_bundle import smoke, smoke_desktop
 
 
 def installer_process(executable: Path, arguments: list[str]) -> None:
@@ -26,7 +26,7 @@ def installer_process(executable: Path, arguments: list[str]) -> None:
                    env=environment, check=True, timeout=180)
 
 
-def verify_installer(installer: Path, version: str) -> None:
+def verify_installer(installer: Path, version: str, screenshot: Path) -> None:
     import winreg
     key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ziao-liu.CopilotChatSync_is1"
     for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
@@ -47,7 +47,8 @@ def verify_installer(installer: Path, version: str) -> None:
             target = Path(temporary) / "installed app"
             try:
                 installer_process(installer, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", f"/DIR={target}"])
-                smoke([str(target / "CopilotChatSync.exe")], version)
+                smoke([str(target / "CopilotChatSync-CLI.exe")], version)
+                smoke_desktop(target / "CopilotChatSync.exe", version, screenshot)
             finally:
                 uninstaller = target / "unins000.exe"
                 if uninstaller.exists():
@@ -73,10 +74,23 @@ def main() -> None:
     bundle = root / "dist/CopilotChatSync"
     output = root / "dist/release"
     output.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--console", "--noupx",
-                    "--name=CopilotChatSync", "--collect-data=copilot_chat_sync", "--hidden-import=psutil._psutil_windows",
-                    "--distpath", str(root / "dist"), "--workpath", str(root / "build"), "--specpath", str(root / "build"),
+    resource = root / "build/windows-version.txt"
+    resource.parent.mkdir(parents=True, exist_ok=True)
+    numbers = tuple(int(part) for part in version.split(".")) + (0,)
+    resource.write_text(f"VSVersionInfo(ffi=FixedFileInfo(filevers={numbers!r}, prodvers={numbers!r}, mask=0x3f, flags=0, OS=0x40004, fileType=0x1, subtype=0, date=(0,0)), kids=[StringFileInfo([StringTable('040904B0', [StringStruct('CompanyName', 'ziao-liu'), StringStruct('FileDescription', 'Copilot Chat Sync desktop app'), StringStruct('FileVersion', {version!r}), StringStruct('ProductName', 'Copilot Chat Sync'), StringStruct('ProductVersion', {version!r})])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])])", encoding="utf-8")
+    common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--noupx",
+              "--collect-data=copilot_chat_sync", "--hidden-import=psutil._psutil_windows", "--version-file", str(resource),
+              "--distpath", str(root / "dist"), "--workpath", str(root / "build"), "--specpath", str(root / "build")]
+    subprocess.run([*common, "--windowed", "--name=CopilotChatSync", "--collect-data=webview",
+                    "--hidden-import=webview.platforms.winforms", "--hidden-import=webview.platforms.edgechromium",
+                    "--hidden-import=pythonnet", "--hidden-import=clr_loader", "--exclude-module=PyQt5",
+                    "--exclude-module=PyQt6", "--exclude-module=PySide2", "--exclude-module=PySide6",
                     str(root / "scripts/desktop.py")], cwd=root, check=True)
+    subprocess.run([*common, "--console", "--name=CopilotChatSync-CLI", "--contents-directory=_cli_internal",
+                    str(root / "scripts/console.py")], cwd=root, check=True)
+    console = root / "dist/CopilotChatSync-CLI"
+    shutil.copy2(console / "CopilotChatSync-CLI.exe", bundle / "CopilotChatSync-CLI.exe")
+    shutil.copytree(console / "_cli_internal", bundle / "_cli_internal")
     for filename in ("LICENSE", "README.md"):
         shutil.copy2(root / filename, bundle / filename)
     shutil.copytree(root / "docs", bundle / "docs")
@@ -86,13 +100,17 @@ def main() -> None:
     if not python_license.is_file():
         raise RuntimeError("Python distribution license is missing")
     shutil.copy2(python_license, licenses / "Python-LICENSE.txt")
-    for package in ("psutil", "pyinstaller"):
+    for package in ("psutil", "pyinstaller", "pywebview", "pythonnet", "clr_loader", "cffi", "pycparser", "bottle", "proxy_tools", "typing_extensions"):
         metadata = distribution(package)
         files = [entry for entry in metadata.files or [] if entry.name.upper().startswith(("LICENSE", "COPYING"))]
         if not files:
-            raise RuntimeError(f"Distribution license is missing: {package}")
+            license_text = metadata.metadata.get("License", "")
+            if len(license_text) < 300:
+                raise RuntimeError(f"Distribution license is missing: {package}")
         destination = licenses / package
         destination.mkdir()
+        if not files:
+            (destination / "LICENSE.txt").write_text(license_text, encoding="utf-8")
         for index, entry in enumerate(files):
             shutil.copy2(metadata.locate_file(entry), destination / f"{index:02d}-{entry.name}")
     vendor = root / "src/copilot_chat_sync/web/vendor"
@@ -100,7 +118,7 @@ def main() -> None:
         shutil.copy2(vendor / filename, licenses / filename)
     build_info = {"version": version, "commit": os.environ.get("GITHUB_SHA", "local"), "target": "windows-x64",
                   "python": platform.python_version(), "pyinstaller": distribution("pyinstaller").version,
-                  "psutil": distribution("psutil").version, "signed": False}
+                  "psutil": distribution("psutil").version, "desktop": "WebView2", "pywebview": distribution("pywebview").version, "signed": False}
     (bundle / "BUILD_INFO.json").write_text(json.dumps(build_info, indent=2) + "\n", encoding="utf-8")
     portable = Path(shutil.make_archive(str(output / f"CopilotChatSync-{version}-windows-x64-portable"),
                                        "zip", root_dir=bundle.parent, base_dir=bundle.name))
@@ -108,16 +126,21 @@ def main() -> None:
         extracted = Path(temporary) / "portable app"
         with zipfile.ZipFile(portable) as archive:
             archive.extractall(extracted)
-        smoke([str(extracted / "CopilotChatSync/CopilotChatSync.exe")], version)
+        smoke([str(extracted / "CopilotChatSync/CopilotChatSync-CLI.exe")], version)
+        smoke_desktop(extracted / "CopilotChatSync/CopilotChatSync.exe", version, output / f"CopilotChatSync-{version}-desktop.png")
+    bootstrapper = root / "build/MicrosoftEdgeWebview2Setup.exe"
+    environment = dict(os.environ, CCS_BOOTSTRAPPER=str(bootstrapper))
+    download = "$ErrorActionPreference='Stop'; Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $env:CCS_BOOTSTRAPPER; $signature=Get-AuthenticodeSignature -LiteralPath $env:CCS_BOOTSTRAPPER; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation') { throw 'WebView2 bootstrapper does not have a valid Microsoft signature' }"
+    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", download], env=environment, check=True, timeout=120)
     compiler = shutil.which("ISCC.exe") or str(Path(os.environ["ProgramFiles(x86)"]) / "Inno Setup 6/ISCC.exe")
-    subprocess.run([compiler, f"/DAppVersion={version}", f"/DBundleDir={bundle}", f"/DOutputDir={output}",
+    subprocess.run([compiler, f"/DAppVersion={version}", f"/DBundleDir={bundle}", f"/DOutputDir={output}", f"/DWebViewSetup={bootstrapper}",
                     str(root / "packaging/windows.iss")], cwd=root, check=True)
     installer = output / f"CopilotChatSync-{version}-windows-x64-Setup.exe"
     if not installer.is_file():
         raise RuntimeError("Installer was not produced")
-    verify_installer(installer, version)
+    verify_installer(installer, version, root / "dist/desktop-check/installed.png")
     checksums = []
-    for artifact in (installer, portable):
+    for artifact in (installer, portable, output / f"CopilotChatSync-{version}-desktop.png"):
         checksum = hashlib.sha256(artifact.read_bytes()).hexdigest()
         checksums.append(f"{checksum}  {artifact.name}\n")
     (output / "SHA256SUMS.txt").write_text("".join(checksums), encoding="ascii", newline="\n")
