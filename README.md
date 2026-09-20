@@ -5,14 +5,28 @@ synced folder. A local browser panel handles setup, transfers, conflicts and bac
 
 **Run it on each desktop computer, not your SSH servers.**
 
-> Early preview, unofficial. Python 3.10+ is required. Real Windows/OneDrive handoff
+> Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
 ![Workspace folders and chat transfers](docs/images/workspaces.png)
 
 ## Start
 
-On each computer, open a local PowerShell or Anaconda Prompt:
+**Windows 10/11 x64: no Python installation required.**
+
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.0)
+  and download `CopilotChatSync-0.1.0-windows-x64-Setup.exe`.
+2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
+3. Your browser opens the local panel. Keep its console window running; `Ctrl+C` stops it.
+
+Prefer no installer? Download the portable ZIP, extract the **whole folder**, and
+open `CopilotChatSync.exe`. Keep `_internal` beside it. The binaries are unsigned;
+Windows may show a SmartScreen warning. Release assets include SHA256 checksums.
+
+<details>
+<summary>Source install (Python 3.10+, Linux/macOS or development)</summary>
+
+Use a local external terminal on each computer:
 
 ```powershell
 git clone https://github.com/ziao-liu/copilot_chat_sync.git
@@ -23,6 +37,8 @@ python -m copilot_chat_sync panel
 
 Your browser opens automatically. Keep this terminal running; `Ctrl+C` stops the panel.
 For later launches, only the last command is needed.
+
+</details>
 
 ## Set Up Once
 
@@ -65,18 +81,14 @@ Conflicting versions are kept for review, not silently overwritten or combined.
 
 ## More
 
-Preview the interface without touching your chats:
+From the portable folder, preview without touching your chats:
 
 ```powershell
-python -m copilot_chat_sync panel --demo
+.\CopilotChatSync.exe panel --demo
 ```
 
-Update an existing checkout, then restart the panel:
-
-```powershell
-git pull --ff-only
-python -m pip install .
-```
+To update, close the app and install/extract the new release. Uninstalling keeps
+your chats, shared store and local configuration/backups.
 
 [Migration, recovery, CLI and limitations](docs/advanced.md).
-All screenshots use synthetic demo data.
+All screenshots use synthetic demo data. [MIT license](LICENSE).

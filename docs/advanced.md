@@ -25,9 +25,11 @@ case-sensitive remote paths are not automatically paired or rewritten.
 
 ## Command-Line Setup
 
-Python 3.10+ and `psutil` are required. `python -m pip install .` installs the package
+The Windows release includes Python and `psutil`; run `CopilotChatSync.exe` without
+arguments to open the panel, or pass the same CLI arguments shown below.
+Source installs need Python 3.10+: `python -m pip install .` installs the package
 and its runtime dependency. Use an external terminal on the desktop running VS Code,
-not the SSH server's terminal. There is no standalone Windows installer yet.
+not the SSH server's terminal.
 
 On Windows, an activated Anaconda/Miniconda prompt is suitable. WindowsApps Python
 may be a Store placeholder. Check the actual interpreter before troubleshooting:
@@ -72,9 +74,9 @@ suffix. Mark the shared store **Always keep on this device** in OneDrive.
 
 Default config locations:
 
-| Platform | Location |
-| --- | --- |
-| Windows | `%LOCALAPPDATA%\CopilotChatSync\config.json` |
+| Platform    | Location                                                                                      |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| Windows     | `%LOCALAPPDATA%\CopilotChatSync\config.json`                                                  |
 | Linux/macOS | `$XDG_CONFIG_HOME/copilot-chat-sync/config.json` or `~/.config/copilot-chat-sync/config.json` |
 
 `--config PATH` is a global option **before** the subcommand. Local config, shared
@@ -201,17 +203,17 @@ journals persist. Writer IDs are historical authors, not online devices or an AC
 
 ## Command Reference
 
-| Command | Purpose |
-| --- | --- |
-| `panel` | Browser interface; `--demo` uses read-only synthetic data |
-| `scan` | Actual workspace IDs, URIs, chat counts and links |
-| `init` / `bind` | Local configuration and workspace selection |
-| `status` / `doctor` | State and diagnostics; doctor also parses native chats |
-| `push` / `pull` | Publish revisions / import converged chats and indexes |
-| `repair` / `migrate` | Repair native indexes / detach old links |
-| `conflicts` / `resolve` | Inspect and explicitly choose competing histories |
-| `export-revision` | Export an archived revision as JSON |
-| `backups` / `restore` | Inspect and recover local transactions |
+| Command                 | Purpose                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| `panel`                 | Browser interface; `--demo` uses read-only synthetic data |
+| `scan`                  | Actual workspace IDs, URIs, chat counts and links         |
+| `init` / `bind`         | Local configuration and workspace selection               |
+| `status` / `doctor`     | State and diagnostics; doctor also parses native chats    |
+| `push` / `pull`         | Publish revisions / import converged chats and indexes    |
+| `repair` / `migrate`    | Repair native indexes / detach old links                  |
+| `conflicts` / `resolve` | Inspect and explicitly choose competing histories         |
+| `export-revision`       | Export an archived revision as JSON                       |
+| `backups` / `restore`   | Inspect and recover local transactions                    |
 
 Run `python -m copilot_chat_sync COMMAND --help` for options. Results are JSON;
 errors go to stderr. Exit codes: `0` success/preview, `2` validation/safety/I/O error,
@@ -259,6 +261,33 @@ python -m pip wheel --no-deps --wheel-dir dist .
 
 Tests use temporary native SQLite/chat fixtures. CI targets Linux, Windows and macOS;
 Windows-only tests cover NTFS junctions and the PowerShell launcher. A configured
-workflow is not evidence of a successful remote run. Before a release, run that
-matrix, pilot an actual two-PC OneDrive handoff/Copilot continuation, and select a
-distribution license. No project license has been selected yet.
+workflow is not evidence of a successful remote run. Before bulk use, pilot an actual
+two-PC OneDrive handoff/Copilot continuation. The project is MIT-licensed; bundled
+dependencies retain their [third-party licenses](third-party-notices.md).
+
+## Windows Builds
+
+On a clean Windows x64 account with Python 3.12 and Inno Setup 6 installed:
+
+```powershell
+python -m pip install .
+python -m pip install -r packaging/requirements-windows.txt
+python scripts/build_windows.py
+```
+
+The build creates a portable ZIP, per-user Setup.exe and SHA256SUMS.txt under
+`dist/release`. It runs the actual portable and installed executables with isolated
+demo data and no Python on PATH, checks packaged resources and API protections, then
+uninstalls and verifies a marker in the real default data folder survives. It refuses
+to run the installer test on an account with an existing installation or data folder.
+Use a disposable build account; the test creates/removes a Start menu entry.
+
+Tag `vX.Y.Z` must match the package and runtime versions. The release workflow reruns
+the whole test matrix and Windows build, verifies artifact hashes and publishes only
+after success. Releases are marked prerelease. No signing certificate is configured;
+SmartScreen warnings may occur. The console must stay open while using the panel.
+
+The project includes the official [OpenCodeReview delegation skill](../.github/skills/open-code-review-delegate/ORIGIN.md).
+It is a development-only review aid, not an application dependency. Delegation mode
+uses this assistant for review without configuring a separate LLM. See the
+[release review](release-review.md) for coverage and validation boundaries.

@@ -2,7 +2,9 @@ import contextlib
 import io
 import json
 import os
+import runpy
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,6 +38,23 @@ class CliTests(unittest.TestCase):
         code, output, errors = self.run_cli("scan", "--storage-root", str(self.storage))
         self.assertEqual(code, 0, errors)
         self.assertEqual(json.loads(output)["workspaces"][0]["uri"], URI)
+
+    def test_desktop_launcher_defaults_to_panel_and_forwards_arguments(self):
+        launcher = Path(__file__).resolve().parents[1] / "scripts/desktop.py"
+        for arguments in ([], ["--version"], ["panel", "--demo", "--no-browser"]):
+            with self.subTest(arguments=arguments):
+                with patch.object(sys, "argv", ["CopilotChatSync.exe", *arguments]):
+                    with patch("copilot_chat_sync.cli.main", return_value=3) as dispatch:
+                        with self.assertRaises(SystemExit) as stopped:
+                            runpy.run_path(str(launcher), run_name="__main__")
+                dispatch.assert_called_once_with(arguments or ["panel"])
+                self.assertEqual(stopped.exception.code, 3)
+
+    def test_bundle_smoke_checks_source_process_in_isolation(self):
+        root = Path(__file__).resolve().parents[1]
+        smoke = runpy.run_path(str(root / "scripts/smoke_bundle.py"))["smoke"]
+        source = f"import sys; sys.path.insert(0, {str(root / 'src')!r}); from copilot_chat_sync.cli import main; raise SystemExit(main())"
+        smoke([sys.executable, "-c", source], "0.1.0")
 
     def test_init_preview_and_explicit_apply(self):
         arguments = ("init", "--store", str(self.root / "cloud"), "--storage-root", str(self.storage))
