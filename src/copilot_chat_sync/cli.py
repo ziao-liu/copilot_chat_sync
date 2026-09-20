@@ -35,6 +35,7 @@ def parser() -> argparse.ArgumentParser:
     init.add_argument("--store", type=expand_path)
     init.add_argument("--storage-root", type=expand_path)
     init.add_argument("--insiders", action="store_true")
+    init.add_argument("--workspace", action="append", help="Include a discovered workspace during setup; repeat for multiple workspaces")
     init.add_argument("--apply", action="store_true")
     bind = commands.add_parser("bind", help="Bind an existing native workspace to this shared group")
     choice = bind.add_mutually_exclusive_group(required=True)
@@ -134,6 +135,8 @@ def dispatch(args: argparse.Namespace) -> dict:
         if args.config.exists():
             raise SyncError("Config already exists; it will not be overwritten")
         config = Config(args.config, args.store or default_store(), args.storage_root or default_storage(args.insiders))
+        selected = [Workspace.open(config.storage, identifier) for identifier in dict.fromkeys(args.workspace or [])]
+        config.bindings = [{"id": workspace.identifier, "uri": workspace.uri} for workspace in selected]
         config.validate()
         if not config.storage.is_dir():
             raise SyncError("Open the folder once in VS Code, or provide the correct --storage-root")
@@ -141,8 +144,12 @@ def dispatch(args: argparse.Namespace) -> dict:
             with operation(config, True):
                 Store(config.store).initialize()
                 config.save()
+        else:
+            Store(config.store).initialize(dry_run=True)
         return {"operation": "init", "applied": args.apply, "config": str(config.path),
-                "store": str(config.store), "storage": str(config.storage), "next": "scan, then bind an existing workspace"}
+                "store": str(config.store), "storage": str(config.storage), "bound": len(selected),
+                "bindings": config.bindings, "linked": sum(is_redirect(workspace.chats) for workspace in selected),
+                "next": "push/pull" if selected else "scan, then bind an existing workspace"}
     config = Config.load(args.config)
     if args.command == "bind":
         if bool(args.server) != bool(args.path):

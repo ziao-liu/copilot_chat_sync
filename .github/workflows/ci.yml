@@ -25,6 +25,11 @@ jobs:
         run: python -m pip install .
       - name: Test native fixtures and safety boundaries
         run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test workspace hierarchy and selection
+        run: node tests/test_workspace_tree.js
       - name: Verify module and installed CLI
         run: |
           python -m copilot_chat_sync --version

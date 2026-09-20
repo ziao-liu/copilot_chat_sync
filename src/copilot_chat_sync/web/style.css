@@ -650,86 +650,183 @@ main {
     max-width: 150px;
 }
 
-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-}
-
-th {
-    font-size: 10px;
-    font-weight: 400;
-    color: #7a8388;
-    text-align: left;
-    border-bottom: 1px solid var(--line);
-    padding: 10px 8px;
-}
-
-td {
-    padding: 17px 8px;
-    border-bottom: 1px solid var(--line);
-    font-size: 12px;
-}
-
-tbody tr:hover {
-    background: #f0f4f3;
-}
-
-tbody tr.is-selected {
-    background: #f1f6f3;
-}
-
-tbody tr.is-selected:hover {
-    background: #eaf2ee;
-}
-
-.workspace-table .check-cell {
-    width: 29px;
-    padding-left: 0;
-}
-
-.workspace-table .numeric {
-    width: 57px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-
-.workspace-table th:last-child {
-    width: 108px;
-    padding-left: 18px;
-}
-
-.workspace-table td:last-child {
-    padding-left: 18px;
-}
-
-.workspace-label {
+.workspace-tree-toolbar,
+.tree-select-all,
+.tree-controls {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 6px;
+}
+
+.workspace-tree-toolbar {
+    padding: 6px 8px 6px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.tree-select-all {
+    flex: 1;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.tree-controls {
+    gap: 2px;
+}
+
+.tree-controls .icon-button {
+    width: 28px;
+    height: 28px;
+}
+
+.tree-columns,
+.tree-meta {
+    display: grid;
+    grid-template-columns: 40px 40px 90px;
+    gap: 10px;
+    align-items: center;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tree-columns {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.tree-columns span:not(:last-child),
+.tree-number {
+    text-align: right;
+}
+
+.workspace-tree,
+.workspace-tree ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.workspace-tree .workspace-branch {
+    margin: 0;
+    font-size: inherit;
+}
+
+.workspace-tree .tree-row {
+    display: grid;
+    grid-template-columns: 16px 16px 16px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 8px 8px calc(var(--tree-level, 0) * 14px);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.tree-level-0 {
+    --tree-level: 0;
+}
+
+.tree-level-1 {
+    --tree-level: 1;
+}
+
+.tree-level-2 {
+    --tree-level: 2;
+}
+
+.tree-level-3 {
+    --tree-level: 3;
+}
+
+.tree-level-4 {
+    --tree-level: 4;
+}
+
+.workspace-tree summary::-webkit-details-marker {
+    display: none;
+}
+
+.workspace-tree summary::marker {
+    content: "";
+}
+
+.tree-row:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
+}
+
+.tree-row input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+}
+
+.tree-row>svg,
+.tree-toggle svg {
+    width: 15px;
+    height: 15px;
+    color: #718982;
+}
+
+.tree-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.workspace-branch[open]>summary .tree-toggle svg {
+    transform: rotate(90deg);
+}
+
+.tree-connection>summary {
+    background: #f0f4f3;
     font-weight: 600;
 }
 
-.workspace-label svg {
-    width: 15px;
-    color: #6e8280;
+.tree-leaf.is-selected {
+    background: #f1f6f3;
 }
 
-.workspace-label span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.workspace-tree .tree-row:hover {
+    background: #eaf2ee;
 }
 
-.workspace-path {
+.tree-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.tree-name strong {
+    font-weight: 500;
+}
+
+.tree-name small {
     display: block;
-    font-family: "IBM Plex Sans", monospace;
-    font-size: 11px;
-    color: #899096;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+.tree-count {
+    color: var(--muted);
+    font-size: 10px;
+    min-width: 22px;
+    text-align: right;
+}
+
+.compact-tree .tree-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tree-chat-count {
+    font-size: 10px;
+    color: var(--muted);
 }
 
 .table-footer {
@@ -874,6 +971,15 @@ tbody tr.is-selected:hover {
     min-height: 30px;
     color: #6d797a;
     font-size: 11px;
+}
+
+.maintenance-menu {
+    grid-column: 1 / -1;
+}
+
+.migration-notice {
+    grid-column: 1 / -1;
+    padding: 10px 0;
 }
 
 .activity-section {
@@ -1134,6 +1240,19 @@ tbody tr.is-selected:hover {
     font-size: 12px;
 }
 
+.setup-locations .path-output {
+    display: block;
+    margin-top: 6px;
+}
+
+.setup-locations li>span {
+    min-width: 0;
+}
+
+#setup-advanced {
+    margin-top: 0;
+}
+
 .section-heading>div {
     display: flex;
     gap: 12px;
@@ -1381,33 +1500,6 @@ pre {
     margin-bottom: 10px;
 }
 
-.scope-row {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 15px 0;
-    border-bottom: 1px solid var(--line);
-    cursor: pointer;
-}
-
-.scope-row>span {
-    min-width: 0;
-    flex: 1;
-}
-
-.scope-row strong {
-    font-size: 12px;
-    display: block;
-    margin-bottom: 5px;
-}
-
-.scope-row small {
-    display: block;
-    color: var(--muted);
-    font-size: 11px;
-    overflow-wrap: anywhere;
-}
-
 .transcript-turn {
     padding: 0 0 22px;
     margin-bottom: 22px;
@@ -1488,19 +1580,6 @@ pre {
 
     .metric {
         padding: 0 15px;
-    }
-
-    .workspace-table .numeric {
-        width: 43px;
-    }
-
-    .workspace-table th:last-child {
-        width: 89px;
-        padding-left: 8px;
-    }
-
-    .workspace-table td:last-child {
-        padding-left: 8px;
     }
 
     .backup-row {
@@ -1738,86 +1817,32 @@ pre {
         padding: 7px;
     }
 
-    .workspace-table thead th:not(.check-cell) {
+    .tree-columns {
         display: none;
     }
 
-    .workspace-table thead tr {
-        display: flex;
-        align-items: center;
-        border-bottom: 1px solid var(--line);
+    .workspace-tree .tree-row {
+        gap: 6px;
+        padding-left: calc(var(--tree-level, 0) * 10px);
     }
 
-    .workspace-table thead tr::after {
-        content: "Select visible bound workspaces";
+    .workspace-tree .tree-leaf {
+        grid-template-columns: 16px 16px 16px minmax(0, 1fr);
+    }
+
+    .tree-meta,
+    .compact-tree .tree-meta {
+        grid-column: 4 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        padding-top: 2px;
+    }
+
+    .tree-number::before {
+        content: attr(data-label) " ";
+        color: var(--muted);
         font-size: 10px;
-        color: var(--muted);
-        padding-left: 7px;
-    }
-
-    .workspace-table thead th {
-        border-bottom: 0;
-        padding: 4px 0;
-    }
-
-    .workspace-table tbody tr {
-        display: grid;
-        grid-template-columns: 29px minmax(0, 1fr) 50px 50px;
-        padding: 15px 0;
-        border-bottom: 1px solid var(--line);
-    }
-
-    .workspace-table td {
-        border: 0;
-        padding: 0;
-    }
-
-    .workspace-table .check-cell {
-        grid-row: 1 / span 2;
-        align-self: center;
-    }
-
-    .workspace-table td:nth-child(2) {
-        grid-column: 2 / -1;
-        padding-bottom: 12px;
-    }
-
-    .workspace-table td.numeric {
-        width: auto;
-        grid-row: 2;
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-        font-size: 12px;
-    }
-
-    .workspace-table td.numeric::before {
-        content: attr(data-label);
-        color: var(--muted);
-        font-size: 9px;
-    }
-
-    .workspace-table td:nth-child(3) {
-        grid-column: 3;
-    }
-
-    .workspace-table td:nth-child(4) {
-        grid-column: 4;
-    }
-
-    .workspace-table td:last-child {
-        grid-column: 2;
-        grid-row: 2;
-        padding: 0;
-        align-self: center;
-    }
-
-    .workspace-label {
-        font-size: 13px;
-    }
-
-    .workspace-path {
-        font-size: 11px;
     }
 
     .handoff {

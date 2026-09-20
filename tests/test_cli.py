@@ -49,6 +49,35 @@ class CliTests(unittest.TestCase):
         self.assertTrue(self.config.exists())
         self.assertEqual(self.run_cli(*arguments, "--apply")[0], 2)
 
+    def test_init_can_include_workspaces_without_a_separate_bind(self):
+        store = self.root / "cloud"
+        arguments = ("init", "--store", str(store), "--storage-root", str(self.storage), "--workspace", WID)
+        code, output, errors = self.run_cli(*arguments)
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(json.loads(output)["bindings"], [{"id": WID, "uri": URI}])
+        self.assertFalse(store.exists())
+        self.assertFalse(self.config.exists())
+        with patch("copilot_chat_sync.sync.require_closed", side_effect=RuntimeError("guard reached")):
+            with self.assertRaisesRegex(RuntimeError, "guard reached"):
+                self.run_cli(*arguments, "--apply")
+        self.assertFalse(store.exists())
+        with patch("copilot_chat_sync.sync.require_closed"):
+            code, output, errors = self.run_cli(*arguments, "--apply")
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(json.loads(output)["bound"], 1)
+        self.assertEqual(Config.load(self.config).bindings, [{"id": WID, "uri": URI}])
+
+    def test_init_preview_rejects_old_shared_folder(self):
+        store = self.root / "old-cloud"
+        store.mkdir()
+        old_chat = store / "old-chat.json"
+        old_chat.write_text("preserved history", encoding="utf-8")
+        code, _, errors = self.run_cli("init", "--store", str(store), "--storage-root", str(self.storage))
+        self.assertEqual(code, 2)
+        self.assertIn("empty shared folder", errors)
+        self.assertFalse(self.config.exists())
+        self.assertEqual(old_chat.read_text(encoding="utf-8"), "preserved history")
+
     def test_bind_decodes_plus_but_keeps_path_case(self):
         config = Config(self.config, self.root / "cloud", self.storage)
         config.save()

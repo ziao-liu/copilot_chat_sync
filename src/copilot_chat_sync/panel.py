@@ -45,7 +45,7 @@ def _options(data: object) -> dict:
     if not isinstance(data, dict):
         raise PanelError("Expected a JSON object")
     fields = {
-        "init": {"store", "storage"}, "bindings": {"workspaces"},
+        "init": {"store", "storage", "workspaces"}, "bindings": {"workspaces"},
         "push": {"workspaces"}, "pull": {"workspaces", "detach"},
         "repair": {"workspaces", "detach"}, "migrate": {"workspaces"},
         "resolve": {"session", "revision"}, "restore": {"backup"},
@@ -71,6 +71,8 @@ def _options(data: object) -> dict:
         raise PanelError("An explicit workspace selection is required")
     if action in ("push", "pull", "repair", "migrate") and not result["workspaces"]:
         raise PanelError("Select at least one bound workspace")
+    if action == "init" and "workspaces" in result and not result["workspaces"]:
+        raise PanelError("Select at least one workspace")
     for key in ({"store", "storage"} if action == "init" else {"session", "revision"} if action == "resolve" else {"backup"} if action == "restore" else set()):
         if key not in result:
             raise PanelError(f"Missing {key}")
@@ -123,6 +125,7 @@ class Panel:
         arguments = [action]
         if action == "init":
             arguments.extend(["--store=" + options["store"], "--storage-root=" + options["storage"]])
+            arguments.extend("--workspace=" + identifier for identifier in options.get("workspaces", []))
         elif action in ("push", "pull", "repair", "migrate"):
             for identifier in options["workspaces"]:
                 arguments.append("--workspace=" + identifier)
@@ -141,7 +144,10 @@ class Panel:
         trees: list[Path] = []
         if options["action"] == "init":
             trees.append(expand_path(options["store"]))
-            paths.append(expand_path(options["storage"]))
+            storage = expand_path(options["storage"])
+            paths.append(storage)
+            for identifier in sorted(options.get("workspaces", [])):
+                paths.extend(storage / identifier / name for name in ("workspace.json", "chatSessions"))
         else:
             config = Config.load(self.config_path)
             paths.extend([config.state_path, config.store / "format.json"])

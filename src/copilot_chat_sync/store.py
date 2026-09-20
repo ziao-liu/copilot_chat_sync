@@ -40,7 +40,7 @@ class Store:
         self.root = root
         self.graphs: dict[str, dict[str, Revision]] = {}
 
-    def initialize(self) -> None:
+    def initialize(self, dry_run: bool = False) -> None:
         plain_path(self.root, self.root)
         marker = self.root / "format.json"
         if marker.exists():
@@ -48,7 +48,8 @@ class Store:
             return
         if self.root.exists() and any(self.root.iterdir()):
             raise SyncError("Choose an empty shared folder, not the old flat chatSessions folder")
-        atomic_write(marker, canonical_bytes(MARKER) + b"\n")
+        if not dry_run:
+            atomic_write(marker, canonical_bytes(MARKER) + b"\n")
 
     def load(self) -> Store:
         try:

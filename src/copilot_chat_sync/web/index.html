@@ -20,7 +20,7 @@
                 <span>Copilot<span class="brand-secondary">Chat Sync</span></span>
             </a>
             <div class="nav-label">WORKSPACE</div>
-            <nav aria-label="Main navigation">
+            <nav id="main-navigation" aria-label="Main navigation">
                 <button class="nav-item active" data-view="sync" aria-current="page"><i
                         data-lucide="arrow-left-right"></i><span>Synchronize</span></button>
                 <button class="nav-item" data-view="conflicts"><i data-lucide="git-fork"></i><span>Conflicts</span><span
@@ -70,19 +70,32 @@
                     <section id="setup" class="setup-section" hidden>
                         <div class="section-heading">
                             <div><span class="section-number">01</span>
-                                <h2>Connect a shared store</h2>
+                                <h2>Connect this computer</h2>
                             </div>
                         </div>
                         <form id="setup-form" class="setup-form">
-                            <div class="field"><label for="store-path">Shared store folder</label><input id="store-path"
-                                    spellcheck="false" placeholder="D:\OneDrive\CopilotChatSync" required></div>
-                            <div class="field"><label for="storage-path">VS Code workspace storage</label><input
-                                    id="storage-path" spellcheck="false"
-                                    placeholder="C:\Users\...\Code\User\workspaceStorage" required></div>
-                            <div class="field"><label>Local configuration</label><output id="setup-config"
-                                    class="path-output"></output></div>
-                            <div><button class="button primary" type="submit"><i data-lucide="scan-eye"></i>Preview
-                                    setup</button></div>
+                            <ul class="plan-list setup-locations">
+                                <li><i data-lucide="cloud"></i><span><strong>Shared sync folder</strong><output
+                                            id="setup-store" class="path-output"></output></span></li>
+                                <li><i data-lucide="monitor"></i><span><strong>Chats on this computer</strong><output
+                                            id="setup-storage" class="path-output"></output></span></li>
+                            </ul>
+                            <details id="setup-advanced">
+                                <summary>Change locations</summary>
+                                <div class="setup-form">
+                                    <div class="field"><label for="store-path">Shared sync folder</label><input
+                                            id="store-path" spellcheck="false" placeholder="D:\OneDrive\CopilotChatSync"
+                                            required></div>
+                                    <div class="field"><label for="storage-path">Local VS Code data folder</label><input
+                                            id="storage-path" spellcheck="false"
+                                            placeholder="C:\Users\...\AppData\Roaming\Code\User\workspaceStorage"
+                                            required></div>
+                                    <div class="field"><label>Local configuration</label><output id="setup-config"
+                                            class="path-output"></output></div>
+                                </div>
+                            </details>
+                            <div><button class="button primary" type="submit"><i
+                                        data-lucide="arrow-right"></i>Continue</button></div>
                         </form>
                     </section>
                     <section id="view-sync" class="view" hidden>
@@ -90,7 +103,7 @@
                             <div class="metric"><span>Shared conversations</span><strong
                                     id="metric-sessions">0</strong><small id="metric-revisions">0 retained
                                     revisions</small></div>
-                            <div class="metric"><span>Bound workspaces</span><strong
+                            <div class="metric"><span>Selected workspaces</span><strong
                                     id="metric-workspaces">0</strong><small id="metric-hosts">0 SSH aliases</small>
                             </div>
                             <div class="metric"><span>Revision writers</span><strong
@@ -104,68 +117,77 @@
                                 <div class="section-heading">
                                     <h2>Workspaces <span id="workspace-total" class="muted-count">0</span></h2><button
                                         class="text-button" id="manage-workspaces"><i
-                                            data-lucide="list-filter"></i>Manage scope</button>
+                                            data-lucide="list-filter"></i>Choose workspaces</button>
                                 </div>
                                 <div class="filter-row">
                                     <div class="search-field"><i data-lucide="search"></i><input id="workspace-search"
                                             type="search" aria-label="Filter workspaces"
                                             placeholder="Filter host or folder"></div><select id="workspace-filter"
-                                        aria-label="Workspace binding filter">
+                                        aria-label="Workspace filter">
+                                        <option value="bound">Selected workspaces</option>
                                         <option value="all">All workspaces</option>
-                                        <option value="bound">Bound only</option>
-                                        <option value="unbound">Not bound</option>
+                                        <option value="unbound">Not selected</option>
                                     </select>
                                 </div>
-                                <div class="table-wrap">
-                                    <table class="workspace-table">
-                                        <thead>
-                                            <tr>
-                                                <th class="check-cell"><input id="select-all" type="checkbox"
-                                                        aria-label="Select all visible bound workspaces"></th>
-                                                <th>Host / folder</th>
-                                                <th class="numeric">Chats</th>
-                                                <th class="numeric">Indexed</th>
-                                                <th>State</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="workspace-rows"></tbody>
-                                    </table>
+                                <div class="workspace-tree-toolbar">
+                                    <label class="tree-select-all"><input id="select-all" type="checkbox"
+                                            aria-label="Select all filtered available workspaces"><span>Server /
+                                            folder</span></label>
+                                    <div class="tree-controls">
+                                        <button id="expand-workspaces" class="icon-button" title="Expand all folders"
+                                            aria-label="Expand all folders"><i
+                                                data-lucide="unfold-vertical"></i></button>
+                                        <button id="collapse-workspaces" class="icon-button"
+                                            title="Collapse all folders" aria-label="Collapse all folders"><i
+                                                data-lucide="fold-vertical"></i></button>
+                                    </div>
+                                    <div class="tree-columns" aria-hidden="true">
+                                        <span>Chats</span><span>Indexed</span><span>State</span></div>
                                 </div>
+                                <div id="workspace-rows" aria-label="Workspace folders"></div>
                                 <div id="workspace-empty" class="empty-state" hidden><i data-lucide="folder-search"></i>
-                                    <h3>No matching workspaces</h3><button id="clear-filter" class="text-button">Clear
-                                        filters</button>
+                                    <h3 id="workspace-empty-title">No matching workspaces</h3><button id="clear-filter"
+                                        class="text-button">Clear filters</button><button id="empty-choose"
+                                        class="text-button" hidden>Choose workspaces</button>
                                 </div>
                                 <div class="table-footer"><span id="selection-count">0 selected</span><span
                                         id="scan-time">Not refreshed</span></div>
                             </section>
                             <aside class="handoff">
                                 <div class="section-heading">
-                                    <h2>Handoff</h2><i data-lucide="arrow-up-down" class="muted"></i>
+                                    <h2>Transfer chats</h2><i data-lucide="arrow-up-down" class="muted"></i>
                                 </div>
-                                <div class="segmented" aria-label="Handoff direction"><button data-mode="push"
+                                <div class="segmented" aria-label="Transfer direction"><button data-mode="push"
                                         class="selected" aria-pressed="true"><i
-                                            data-lucide="upload"></i>Push</button><button data-mode="pull"
-                                        aria-pressed="false"><i data-lucide="download"></i>Pull</button></div>
+                                            data-lucide="upload"></i>Send</button><button data-mode="pull"
+                                        aria-pressed="false"><i data-lucide="download"></i>Receive</button></div>
                                 <div class="transfer-route"><span><i id="route-source-icon"
                                             data-lucide="laptop"></i><span id="route-source">This device</span></span><i
                                         data-lucide="arrow-right"></i><span><i id="route-target-icon"
-                                            data-lucide="cloud"></i><span id="route-target">Shared store</span></span>
+                                            data-lucide="cloud"></i><span id="route-target">Sync folder</span></span>
                                 </div>
                                 <div class="handoff-selection"><strong id="handoff-count">0</strong><span>workspaces
                                         selected</span></div>
-                                <label class="checkbox-row" id="detach-row" hidden><input id="detach"
-                                        type="checkbox"><span>Quarantine editing snapshots<span class="warning-text">Old
-                                            undo / checkpoints removed from use</span></span></label>
+                                <div id="migration-notice" class="migration-notice" hidden><span
+                                        class="warning-text">Old shared links detected</span><button id="prepare-links"
+                                        class="text-button"><i data-lucide="unlink"></i>Review old setup</button></div>
                                 <button id="preview-handoff" class="button primary full-width"><i
-                                        data-lucide="scan-eye"></i><span>Preview push</span></button>
+                                        data-lucide="scan-eye"></i><span>Review send</span></button>
                                 <div class="local-write-state" id="write-state"><i
                                         data-lucide="lock-keyhole"></i><span>Confirmation required</span></div>
-                                <div class="maintenance">
-                                    <div class="nav-label">MAINTENANCE</div><button class="text-button"
-                                        id="preview-repair"><i data-lucide="wrench"></i>Repair indexes</button><button
-                                        class="text-button" id="preview-migrate"><i data-lucide="unlink"></i>Migrate old
-                                        links</button>
-                                </div>
+                                <details class="maintenance-menu">
+                                    <summary>Advanced</summary>
+                                    <div class="maintenance">
+                                        <label class="checkbox-row" id="detach-row" hidden><input id="detach"
+                                                type="checkbox"><span>Quarantine editing snapshots<span
+                                                    class="warning-text">Old
+                                                    undo / checkpoints removed from use</span></span></label>
+                                        <button class="text-button" id="preview-repair"><i
+                                                data-lucide="wrench"></i>Repair indexes</button>
+                                        <button class="text-button" id="preview-migrate"><i
+                                                data-lucide="unlink"></i>Migrate old links</button>
+                                    </div>
+                                </details>
                             </aside>
                         </div>
                         <section class="activity-section">
@@ -191,7 +213,7 @@
                         <section class="settings-section">
                             <div class="section-heading">
                                 <h2>Local configuration</h2><button id="settings-scope" class="button secondary"><i
-                                        data-lucide="list-filter"></i>Manage scope</button>
+                                        data-lucide="list-filter"></i>Choose workspaces</button>
                             </div>
                             <dl id="config-details" class="config-details"></dl>
                         </section>

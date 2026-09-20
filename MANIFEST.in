@@ -1,6 +1,7 @@
 include README.md
+recursive-include docs *.md *.png
 include scripts/chat-sync.ps1
-recursive-include tests *.py
+recursive-include tests *.py *.js
 include .github/workflows/ci.yml
 include .vscode/settings.json
 include .gitignore

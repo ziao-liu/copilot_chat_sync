@@ -19,7 +19,8 @@ if (initialToken) {
     history.replaceState(null, "", location.pathname);
 }
 
-const state = { snapshot: null, selected: null, view: "sync", mode: "push", busy: false, choices: {}, preview: null };
+const state = { snapshot: null, selected: null, view: "sync", mode: "push", busy: false, choices: {}, preview: null, setup: null, scope: null, collapsed: new Set() };
+const actionLabels = { init: "Setup", bindings: "Workspaces", push: "Send", pull: "Receive", migrate: "Old setup", repair: "Repair", resolve: "Resolve", restore: "Restore" };
 let toastTimer;
 let planTimer;
 
@@ -45,6 +46,69 @@ function decodedUri(uri) {
     catch { return uri; }
 }
 
+function workspaceTree(workspaces) {
+    const connections = new Map();
+    const makeNode = (key, label, path, kind) => ({ key, label, path, kind, children: new Map(), workspaces: [] });
+    for (const workspace of workspaces) {
+        let connection, host, segments, local = false, absolute = true;
+        try {
+            const parsed = new URL(workspace.uri);
+            const authority = decodeURIComponent(parsed.host);
+            connection = JSON.stringify([parsed.protocol, authority]);
+            local = parsed.protocol === "file:" && !authority;
+            host = local ? "This computer" : workspaceParts(workspace).host;
+            segments = parsed.pathname.split("/").filter(Boolean).map(decodedUri);
+            absolute = parsed.pathname.startsWith("/") && !(local && /^[a-zA-Z]:$/.test(segments[0] || ""));
+        } catch {
+            connection = "unknown";
+            host = "Other workspaces";
+            segments = [workspace.uri];
+            absolute = false;
+        }
+        if (!connections.has(connection)) connections.set(connection, makeNode(connection, host, host, local ? "local" : "connection"));
+        let parent = connections.get(connection);
+        for (let index = 0; index < segments.length; index += 1) {
+            const segment = segments[index];
+            if (!parent.children.has(segment)) {
+                const path = (absolute ? "/" : "") + segments.slice(0, index + 1).join("/");
+                parent.children.set(segment, makeNode(JSON.stringify([connection, ...segments.slice(0, index + 1)]), index === 0 && absolute ? "/" + segment : segment, path, "folder"));
+            }
+            parent = parent.children.get(segment);
+        }
+        parent.workspaces.push(workspace);
+    }
+    const compare = (left, right) => left.label.localeCompare(right.label, "en", { numeric: true, sensitivity: "variant" });
+    function finish(node) {
+        let label = node.label;
+        while (node.kind === "folder" && !node.workspaces.length && node.children.size === 1) {
+            const child = [...node.children.values()][0];
+            if (child.workspaces.length) break;
+            label += "/" + child.label;
+            node = child;
+        }
+        const children = [...node.children.values()].sort(compare).map(finish);
+        const entries = [...node.workspaces].sort((left, right) => left.id.localeCompare(right.id));
+        return { key: node.key, label, path: node.path, kind: node.kind, children, workspaces: entries,
+            ids: [...entries.map((workspace) => workspace.id), ...children.flatMap((child) => child.ids)] };
+    }
+    return [...connections.values()].sort(compare).map(finish);
+}
+
+function workspaceSelection(workspaces, selection, field) {
+    const ids = workspaces.filter((workspace) => field === "select" ? workspace.bound && !workspace.missing : !workspace.missing || selection.has(workspace.id)).map((workspace) => workspace.id);
+    const selected = ids.filter((identifier) => selection.has(identifier)).length;
+    return { ids, checked: ids.length > 0 && selected === ids.length, partial: selected > 0 && selected < ids.length, disabled: !ids.length };
+}
+
+function applyWorkspaceSelection(workspaces, selection, identifiers, checked, field) {
+    const allowed = new Set(workspaceSelection(workspaces, selection, field).ids);
+    for (const identifier of identifiers) {
+        if (!allowed.has(identifier)) continue;
+        if (checked) selection.add(identifier);
+        else selection.delete(identifier);
+    }
+}
+
 function dateLabel(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "Unknown date";
@@ -60,7 +124,9 @@ function setBusy(value) {
     for (const button of document.querySelectorAll("#modal-actions button")) {
         button.disabled = value || button.dataset.blocked === "true";
     }
-    updateHandoff();
+    if (state.snapshot?.configured) refreshWorkspaceSelection();
+    else updateHandoff();
+    for (const root of byId("modal-body").querySelectorAll("[data-workspace-tree]")) updateTreeSelection(root);
 }
 
 function showError(error) {
@@ -132,10 +198,14 @@ async function loadState() {
     byId("conflict-count").textContent = number(snapshot.conflicts.length);
     byId("conflict-count").hidden = snapshot.conflicts.length === 0;
     byId("setup").hidden = snapshot.configured;
+    byId("main-navigation").hidden = !snapshot.configured;
+    byId("diagnostics").hidden = !snapshot.configured;
     if (!snapshot.configured) {
         if (!byId("store-path").value) byId("store-path").value = snapshot.defaults.store;
         if (!byId("storage-path").value) byId("storage-path").value = snapshot.defaults.storage;
         byId("setup-config").textContent = snapshot.config_path;
+        if (!byId("store-path").value || !byId("storage-path").value) byId("setup-advanced").open = true;
+        updateSetupLocations();
     } else {
         renderMetrics();
         renderWorkspaces();
@@ -148,6 +218,11 @@ async function loadState() {
     icons();
 }
 
+function updateSetupLocations() {
+    byId("setup-store").textContent = byId("store-path").value.trim() || "Choose a shared folder";
+    byId("setup-storage").textContent = byId("storage-path").value.trim() || "Choose the local VS Code data folder";
+}
+
 function selectView(view) {
     state.view = view;
     for (const button of document.querySelectorAll("[data-view]")) {
@@ -158,7 +233,7 @@ function selectView(view) {
     }
     const names = { sync: ["LOCAL & SHARED", "Synchronization"], conflicts: ["REVIEW & RESOLVE", "Conflicts"], backups: ["LOCAL RECOVERY", "Backups"], settings: ["SCOPE & IDENTITY", "Settings"] };
     const labels = names[view];
-    byId("view-eyebrow").textContent = state.snapshot?.configured === false ? "LOCAL CONFIGURATION" : labels[0];
+    byId("view-eyebrow").textContent = state.snapshot?.configured === false ? "STEP 1 OF 3" : labels[0];
     byId("view-title").textContent = state.snapshot?.configured === false ? "Set up sync" : labels[1];
     for (const section of document.querySelectorAll(".view")) section.hidden = section.id !== `view-${view}` || !state.snapshot?.configured;
 }
@@ -185,27 +260,107 @@ function filteredWorkspaces() {
         (filter === "all" || (filter === "bound" ? workspace.bound : !workspace.bound)));
 }
 
+function workspaceTreeMarkup(workspaces, selection, field) {
+    const detailed = field === "select";
+    const searching = detailed && Boolean(byId("workspace-search").value.trim());
+    function leaf(workspace, label, depth, duplicate = false) {
+        const parts = workspaceParts(workspace);
+        let status = "";
+        if (workspace.missing) status = badge("Unavailable", "danger");
+        else if (detailed && !workspace.bound) status = badge("Not selected");
+        else if (workspace.linked) status = badge("Old link", "warning");
+        else if (workspace.editing_snapshots) status = badge("Snapshots", "warning");
+        else if (detailed) status = badge("Ready", "good");
+        const metadata = detailed ? `<span class="tree-number" data-label="Chats">${number(workspace.sessions)}</span><span class="tree-number" data-label="Indexed">${workspace.indexed === undefined ? "-" : number(workspace.indexed)}</span><span class="tree-status">${status}</span>` : `<span class="tree-chat-count">${number(workspace.sessions)} chats</span>${status}`;
+        return `<li><label class="tree-row tree-leaf tree-level-${Math.min(depth, 4)}" title="${escapeHtml(workspace.uri)}"><span class="tree-spacer"></span><input type="checkbox" data-${field}="${escapeHtml(workspace.id)}" aria-label="Select ${escapeHtml(parts.host)} ${escapeHtml(parts.path)}${duplicate ? " " + escapeHtml(workspace.id) : ""}" ${selection.has(workspace.id) ? "checked" : ""}>${icon("folder")}<span class="tree-name"><strong>${escapeHtml(label)}</strong>${duplicate ? `<small>${escapeHtml(workspace.id)}</small>` : ""}</span><span class="tree-meta">${metadata}</span></label></li>`;
+    }
+    function branch(node, depth, host) {
+        if (node.kind === "folder" && !node.children.length && node.workspaces.length === 1) return leaf(node.workspaces[0], node.label, depth);
+        const key = JSON.stringify([field, node.key]);
+        const own = node.workspaces.map((workspace, index) => leaf(workspace, node.workspaces.length > 1 ? `Workspace ${index + 1}` : "This folder", depth + 1, node.workspaces.length > 1)).join("");
+        return `<li><details class="workspace-branch ${node.kind === "folder" ? "" : "tree-connection"}" data-tree-key="${escapeHtml(key)}" data-search-open="${searching}" ${searching || !state.collapsed.has(key) ? "open" : ""}><summary class="tree-row tree-group-row tree-level-${Math.min(depth, 4)}" title="${escapeHtml(node.path)}"><span class="tree-toggle">${icon("chevron-right")}</span><input type="checkbox" data-tree-members="${escapeHtml(JSON.stringify(node.ids))}" aria-label="Select available workspaces in ${escapeHtml(host)} ${escapeHtml(node.path)}">${icon(node.kind === "folder" ? "folder" : node.kind === "local" ? "laptop" : "server")}<span class="tree-name">${escapeHtml(node.label)}</span><span class="tree-count" title="${node.ids.length} workspaces">${number(node.ids.length)}</span></summary><ul>${own}${node.children.map((child) => branch(child, depth + 1, host)).join("")}</ul></details></li>`;
+    }
+    return `<ul class="workspace-tree ${detailed ? "" : "compact-tree"}" data-workspace-tree="${field}">${workspaceTree(workspaces).map((node) => branch(node, 0, node.label)).join("")}</ul>`;
+}
+
+function treeContext(field) {
+    if (field === "select") return { rows: filteredWorkspaces(), selected: state.selected };
+    if (field === "scope") return { rows: state.snapshot.workspaces, selected: state.scope };
+    return { rows: state.setup.workspaces, selected: state.setup.selected };
+}
+
+function updateTreeSelection(root) {
+    if (!root) return;
+    const field = root.dataset.workspaceTree;
+    const context = treeContext(field);
+    const rows = new Map(context.rows.map((workspace) => [workspace.id, workspace]));
+    for (const input of root.querySelectorAll('input[type="checkbox"]')) {
+        const identifier = input.getAttribute("data-" + field);
+        const members = identifier === null ? JSON.parse(input.dataset.treeMembers) : [identifier];
+        const status = workspaceSelection(members.map((member) => rows.get(member)).filter(Boolean), context.selected, field);
+        input.checked = identifier === null ? status.checked : context.selected.has(identifier);
+        input.indeterminate = identifier === null && status.partial;
+        input.disabled = state.busy || status.disabled;
+        input.closest(".tree-row").classList.toggle("is-selected", identifier !== null && input.checked);
+    }
+}
+
+function refreshWorkspaceSelection() {
+    const status = workspaceSelection(filteredWorkspaces(), state.selected, "select");
+    byId("select-all").disabled = state.busy || status.disabled;
+    byId("select-all").checked = status.checked;
+    byId("select-all").indeterminate = status.partial;
+    updateTreeSelection(byId("workspace-rows").querySelector("[data-workspace-tree]"));
+    updateHandoff();
+}
+
+function changeTreeSelection(event) {
+    const input = event.target;
+    const root = input.closest("[data-workspace-tree]");
+    if (!root || input.type !== "checkbox") return;
+    const field = root.dataset.workspaceTree;
+    const context = treeContext(field);
+    const identifier = input.getAttribute("data-" + field);
+    const members = identifier === null ? JSON.parse(input.dataset.treeMembers) : [identifier];
+    if (!state.busy) applyWorkspaceSelection(context.rows, context.selected, members, input.checked, field);
+    if (field === "select") refreshWorkspaceSelection();
+    else {
+        updateTreeSelection(root);
+        if (field === "setup-scope") {
+            const button = byId("review-setup");
+            button.dataset.blocked = String(!context.selected.size);
+            button.disabled = state.busy || !context.selected.size;
+        }
+    }
+}
+
+function rememberTreeExpansion(event) {
+    const branch = event.target;
+    if (!branch.isConnected || !branch.matches("details[data-tree-key]") || branch.dataset.searchOpen === "true") return;
+    if (branch.open) state.collapsed.delete(branch.dataset.treeKey);
+    else state.collapsed.add(branch.dataset.treeKey);
+}
+
+function expandWorkspaceTree(open) {
+    for (const branch of byId("workspace-rows").querySelectorAll("details[data-tree-key]")) {
+        branch.open = open;
+        rememberTreeExpansion({ target: branch });
+    }
+}
+
 function renderWorkspaces() {
     const rows = filteredWorkspaces();
     byId("workspace-total").textContent = number(state.snapshot.workspaces.length);
-    byId("workspace-rows").innerHTML = rows.map((workspace) => {
-        const parts = workspaceParts(workspace);
-        const selected = state.selected.has(workspace.id);
-        let status = badge("Ready", "good");
-        if (workspace.missing) status = badge("Unavailable", "danger");
-        else if (!workspace.bound) status = badge("Not bound");
-        else if (workspace.linked) status = badge("Linked", "warning");
-        else if (workspace.editing_snapshots) status = badge("Snapshots", "warning");
-        return `<tr class="${selected ? "is-selected" : ""}"><td class="check-cell"><input type="checkbox" data-select="${workspace.id}" aria-label="Select ${escapeHtml(parts.host)} ${escapeHtml(parts.path)}" ${selected ? "checked" : ""} ${!workspace.bound || workspace.missing ? "disabled" : ""}></td><td><div class="workspace-label">${icon("server") }<span title="${escapeHtml(parts.host)}">${escapeHtml(parts.host)}</span></div><span class="workspace-path" title="${escapeHtml(workspace.uri)}">${escapeHtml(parts.path)}</span></td><td class="numeric" data-label="Chats">${number(workspace.sessions)}</td><td class="numeric" data-label="Indexed">${workspace.indexed === undefined ? "-" : number(workspace.indexed)}</td><td>${status}</td></tr>`;
-    }).join("");
+    byId("workspace-rows").innerHTML = workspaceTreeMarkup(rows, state.selected, "select");
     byId("workspace-empty").hidden = rows.length > 0;
-    byId("select-all").disabled = !rows.some((workspace) => workspace.bound && !workspace.missing);
-    const selectable = rows.filter((workspace) => workspace.bound && !workspace.missing);
-    const checked = selectable.filter((workspace) => state.selected.has(workspace.id));
-    byId("select-all").checked = selectable.length > 0 && checked.length === selectable.length;
-    byId("select-all").indeterminate = checked.length > 0 && checked.length < selectable.length;
+    const unconfigured = !state.snapshot.workspaces.some((workspace) => workspace.bound && !workspace.missing);
+    byId("workspace-empty-title").textContent = unconfigured ? "No workspaces selected" : "No matching workspaces";
+    byId("empty-choose").hidden = !unconfigured;
+    byId("clear-filter").hidden = unconfigured;
+    byId("expand-workspaces").disabled = !rows.length;
+    byId("collapse-workspaces").disabled = !rows.length;
     byId("scan-time").textContent = `Refreshed ${new Date().toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}`;
-    updateHandoff();
+    refreshWorkspaceSelection();
     icons();
 }
 
@@ -214,14 +369,17 @@ function updateHandoff() {
     byId("selection-count").textContent = `${number(selected)} selected`;
     byId("handoff-count").textContent = number(selected);
     const push = state.mode === "push";
-    byId("route-source").textContent = push ? "This device" : "Shared store";
-    byId("route-target").textContent = push ? "Shared store" : "This device";
+    byId("route-source").textContent = push ? "This device" : "Sync folder";
+    byId("route-target").textContent = push ? "Sync folder" : "This device";
     byId("route-source-icon").outerHTML = icon(push ? "laptop" : "cloud", 'id="route-source-icon"');
     byId("route-target-icon").outerHTML = icon(push ? "cloud" : "laptop", 'id="route-target-icon"');
     byId("detach-row").hidden = push;
+    const linked = state.snapshot?.workspaces.some((workspace) => workspace.linked && state.selected?.has(workspace.id));
+    byId("migration-notice").hidden = !linked;
     const button = byId("preview-handoff");
-    button.innerHTML = `${state.busy ? '<span class="spinner"></span>' : icon("scan-eye")}<span>${state.busy ? "Working" : `Preview ${state.mode}`}</span>`;
-    for (const identifier of ["preview-handoff", "preview-repair", "preview-migrate"]) byId(identifier).disabled = state.busy || !selected;
+    button.innerHTML = `${state.busy ? '<span class="spinner"></span>' : icon("scan-eye")}<span>${state.busy ? "Working" : `Review ${push ? "send" : "receive"}`}</span>`;
+    for (const identifier of ["preview-handoff", "preview-repair", "preview-migrate", "prepare-links"]) byId(identifier).disabled = state.busy || !selected;
+    if (linked) button.disabled = true;
     for (const mode of document.querySelectorAll("[data-mode]")) {
         mode.classList.toggle("selected", mode.dataset.mode === state.mode);
         mode.setAttribute("aria-pressed", String(mode.dataset.mode === state.mode));
@@ -234,14 +392,15 @@ function updateHandoff() {
 function renderActivity() {
     const entries = state.snapshot.activity;
     byId("activity-list").innerHTML = entries.length ? entries.map((entry, index) =>
-        `<div class="activity-row">${icon(entry.status === "error" ? "circle-alert" : "circle-check")}<strong>${escapeHtml(entry.action)}</strong><button class="text-button result" data-activity="${index}">${escapeHtml(entry.status === "error" ? entry.result : operationSummary(entry.result))}</button><time>${dateLabel(entry.time)}</time></div>`).join("") : `<div class="empty-activity">${icon("history")}<span>No operations in this panel session</span></div>`;
+        `<div class="activity-row">${icon(entry.status === "error" ? "circle-alert" : "circle-check")}<strong>${escapeHtml(actionLabels[entry.action] || entry.action)}</strong><button class="text-button result" data-activity="${index}">${escapeHtml(entry.status === "error" ? entry.result : operationSummary(entry.result))}</button><time>${dateLabel(entry.time)}</time></div>`).join("") : `<div class="empty-activity">${icon("history")}<span>No operations in this panel session</span></div>`;
 }
 
 function operationSummary(result) {
-    if (result.operation === "push") return `${number(result.published ?? result.would_publish)} published / ${number(result.unchanged)} unchanged`;
-    if (result.operation === "bindings") return `${number(result.bound)} workspaces bound`;
+    if (result.operation === "push") return `${number(result.published ?? result.would_publish)} sent to sync folder / ${number(result.unchanged)} unchanged`;
+    if (result.operation === "bindings") return `${number(result.bound)} workspaces selected`;
     if (result.operation === "resolve") return "Version selected; other histories retained";
-    if (result.operation === "init") return "Local configuration created";
+    if (result.operation === "init") return `${number(result.bound)} workspaces connected`;
+    if (result.operation === "migrate") return `${number(result.workspaces.reduce((total, workspace) => total + workspace.files, 0))} chats retained / ${number(result.workspaces.length)} links detached`;
     return `${number(result.files)} files / ${number(result.indexes ?? result.databases)} indexes`;
 }
 
@@ -301,6 +460,7 @@ function dialog(title, body, actions = [], eyebrow = "REVIEW") {
         byId("modal-actions").append(button);
     }
     if (!byId("modal").open) byId("modal").showModal();
+    for (const root of byId("modal-body").querySelectorAll("[data-workspace-tree]")) updateTreeSelection(root);
     icons();
 }
 
@@ -310,31 +470,69 @@ function detailDisclosure(data) {
 
 function showScope() {
     if (state.busy || !state.snapshot?.configured) return;
+    scopeDialog();
+}
+
+function scopeRows(rows, selection, field) {
+    return `<div class="scope-list">${workspaceTreeMarkup(rows, selection, field)}</div>`;
+}
+
+function scopeDialog() {
     const rows = state.snapshot.workspaces;
-    const body = rows.length ? `<div class="plan-label">${rows.filter((workspace) => workspace.bound).length} included / ${rows.length} discovered</div><div class="scope-list">${rows.map((workspace) => {
-        const parts = workspaceParts(workspace);
-        return `<label class="scope-row"><input type="checkbox" data-scope="${workspace.id}" ${workspace.bound ? "checked" : ""}><span><strong>${escapeHtml(parts.host)}</strong><small>${escapeHtml(parts.path)}</small><small>${workspace.id}</small></span>${workspace.missing ? badge("Unavailable", "danger") : ""}</label>`;
-    }).join("")}</div>` : empty("folder-search", "No workspaces discovered");
-    dialog("Sync scope", body, [{ label: "Cancel", run: closeDialog }, { label: "Preview changes", primary: true, icon: "scan-eye", run: () => {
+    state.scope = new Set(rows.filter((workspace) => workspace.bound).map((workspace) => workspace.id));
+    const body = rows.length ? scopeRows(rows, state.scope, "scope") : empty("folder-search", "No workspaces discovered");
+    dialog("Choose workspaces", body, [{ label: "Cancel", run: closeDialog }, { label: "Review selection", primary: true, icon: "scan-eye", run: () => {
         const workspaces = [...document.querySelectorAll("[data-scope]:checked")].map((input) => input.dataset.scope);
         preview({ action: "bindings", workspaces });
-    } }], "WORKSPACE BINDINGS");
+    } }], "THIS COMPUTER");
+}
+
+function setupScopeDialog() {
+    state.preview = null;
+    const setup = state.setup;
+    const body = setup.workspaces.length ? scopeRows(setup.workspaces, setup.selected, "setup-scope") : empty("folder-search", "No workspaces found in this VS Code installation");
+    const warnings = setup.issues.map((issue) => `<div class="notice warning">${icon("circle-alert")}<span>${escapeHtml(issue)}</span></div>`).join("");
+    dialog("Choose workspaces", body + warnings, [{ label: "Back", run: closeDialog }, { label: "Scan again", icon: "refresh-cw", run: scanSetup }, {
+        label: "Review setup", id: "review-setup", icon: "arrow-right", primary: true, disabled: !setup.selected.size,
+        run: () => preview({ action: "init", store: setup.store, storage: setup.storage, workspaces: [...setup.selected] }),
+    }], "STEP 2 OF 3");
+}
+
+function scanSetup() {
+    task(async () => {
+        dialog("Finding workspaces", '<div class="loading-state"><span class="spinner"></span>Reading this computer</div>', [], "READ ONLY");
+        const store = byId("store-path").value.trim();
+        const storage = byId("storage-path").value.trim();
+        try {
+            const scanned = await api("/api/scan", { storage });
+            const previous = state.setup?.storage === storage ? state.setup.selected : new Set();
+            const selected = new Set(scanned.workspaces.filter((workspace) => previous.has(workspace.id)).map((workspace) => workspace.id));
+            state.setup = { store, storage, workspaces: scanned.workspaces, issues: scanned.issues, selected };
+            setupScopeDialog();
+        } catch (error) {
+            byId("setup-advanced").open = true;
+            dialog("Cannot read workspaces", `<div class="notice error">${icon("circle-alert")}<span>${escapeHtml(error.message)}</span></div>`, [{ label: "Back", run: closeDialog }], "NO CHANGES APPLIED");
+        }
+    });
 }
 
 function planBody(plan, options) {
     const result = plan.result;
     const metrics = [];
-    for (const [key, label] of [["would_publish", "New revisions"], ["unchanged", "Unchanged"], ["files", "Conversation files"], ["indexes", "Indexes"], ["databases", "Indexes"], ["editing_snapshots_to_quarantine", "Snapshots quarantined"], ["bound", "Bound workspaces"], ["migrations", "Link migrations"]]) {
+    for (const [key, label] of [["would_publish", "New revisions"], ["unchanged", "Unchanged"], ["files", "Conversation files"], ["indexes", "Indexes"], ["databases", "Indexes"], ["editing_snapshots_to_quarantine", "Snapshots quarantined"], ["bound", "Selected workspaces"], ["migrations", "Link migrations"]]) {
         if (typeof result[key] === "number") metrics.push([label, result[key]]);
     }
     if (Array.isArray(result.added)) metrics.push(["Added to scope", result.added.length]);
     if (Array.isArray(result.removed)) metrics.push(["Removed from scope", result.removed.length]);
+    if (options.action === "migrate") metrics.push(["Old links", result.workspaces.length], ["Chats retained", result.workspaces.reduce((total, workspace) => total + workspace.files, 0)]);
     let content = metrics.length ? `<div class="plan-grid">${metrics.map(([label, value]) => `<div class="plan-metric"><span>${label}</span><strong>${number(value)}</strong></div>`).join("")}</div>` : "";
     if (options.workspaces?.length) {
-        const selected = state.snapshot.workspaces.filter((workspace) => options.workspaces.includes(workspace.id));
+        const selected = options.action === "init" ? result.bindings : state.snapshot.workspaces.filter((workspace) => options.workspaces.includes(workspace.id));
         content += `<ul class="plan-list">${selected.map((workspace) => { const parts = workspaceParts(workspace); return `<li>${icon("server")}<span>${escapeHtml(parts.host)}<br><span class="muted">${escapeHtml(parts.path)}</span></span></li>`; }).join("")}</ul>`;
     }
     if (options.action === "init") content += `<ul class="plan-list"><li>${icon("cloud")}<span>${escapeHtml(result.store)}</span></li><li>${icon("folder")}<span>${escapeHtml(result.storage)}</span></li></ul>`;
+    if (result.linked) content += `<div class="notice warning">${icon("unlink")}<span>${number(result.linked)} selected workspaces still use old shared links. Migration is required before sending or receiving.</span></div>`;
+    if (options.action === "migrate") content += `<div class="notice warning">${icon("unlink")}<span>Previous sync/link scripts must be stopped on every computer before applying. Existing shared files are retained.</span></div>`;
     if (options.action === "resolve") content += `<div class="notice warning">${icon("git-fork")}<span>The selected version becomes the shared head. Other revisions stay archived.<br>${escapeHtml(options.revision.slice(0, 20))}</span></div>`;
     if (options.action === "restore") content += `<div class="notice warning">${icon("rotate-ccw")}<span>Restore chat files and index keys from ${escapeHtml(options.backup)}. Editing checkpoints remain quarantined.</span></div>`;
     if (result.conflicts?.length) content += `<div class="notice warning">${icon("git-fork")}<span>${result.conflicts.length} competing histories. Both versions will be retained.</span></div>`;
@@ -360,10 +558,11 @@ function preview(options) {
             return;
         }
         state.preview = { ...plan, options, deadline: Date.now() + plan.expires_in * 1000 };
-        const labels = { push: "Review push", pull: "Review pull", init: "Review setup", bindings: "Review sync scope", repair: "Review index repair", migrate: "Review link migration", resolve: "Review resolution", restore: "Review restoration" };
+        const labels = { push: "Review send", pull: "Review receive", init: "Review setup", bindings: "Review workspaces", repair: "Review index repair", migrate: "Review link migration", resolve: "Review resolution", restore: "Review restoration" };
         const blocked = plan.read_only || state.snapshot.code_processes.length > 0 || !state.snapshot.process_check_ok || plan.needs_acknowledgement;
-        dialog(labels[options.action], planBody(plan, options), [{ label: "Cancel", run: closeDialog },
-            { label: plan.read_only ? "Read-only demo" : "Confirm & apply", id: "confirm-apply", primary: true, icon: "check", disabled: blocked, run: applyPlan }], "PREVIEW / NO CHANGES YET");
+        const setup = options.action === "init" && state.setup;
+        dialog(labels[options.action], planBody(plan, options), [{ label: setup ? "Back" : "Cancel", run: setup ? setupScopeDialog : closeDialog },
+            { label: plan.read_only ? "Read-only demo" : "Confirm & apply", id: "confirm-apply", primary: true, icon: "check", disabled: blocked, run: applyPlan }], setup ? "STEP 3 OF 3 / NO CHANGES YET" : "PREVIEW / NO CHANGES YET");
         byId("acknowledge")?.addEventListener("change", updateConfirmation);
         planTimer = setInterval(updateConfirmation, 1000);
     });
@@ -389,9 +588,13 @@ function applyPlan() {
         try {
             const result = await api("/api/apply", { plan: plan.plan, acknowledge });
             state.preview = null;
-            if (plan.options.action === "bindings") state.selected = null;
+            if (["init", "bindings"].includes(plan.options.action)) state.selected = null;
             await loadState();
-            dialog(result.conflicts?.length ? "Published with conflicts" : "Operation complete", `<div class="plan-label">${escapeHtml(operationSummary(result))}</div>${result.backup ? `<div class="notice warning">${icon("archive")}<span>Local backup: ${escapeHtml(result.backup)}</span></div>` : ""}${detailDisclosure(result)}`, [{ label: "Done", primary: true, run: closeDialog }], result.conflicts?.length ? "REVIEW REQUIRED" : "COMPLETE");
+            if (plan.options.action === "init" && !result.bound) {
+                scopeDialog();
+                return;
+            }
+            dialog(result.conflicts?.length ? "Published with conflicts" : plan.options.action === "init" ? "This computer is connected" : "Operation complete", `<div class="plan-label">${escapeHtml(operationSummary(result))}</div>${result.backup ? `<div class="notice warning">${icon("archive")}<span>Local backup: ${escapeHtml(result.backup)}</span></div>` : ""}${detailDisclosure(result)}`, [{ label: "Done", primary: true, run: closeDialog }], result.conflicts?.length ? "REVIEW REQUIRED" : "COMPLETE");
         } catch (error) {
             state.preview = null;
             dialog("Operation stopped", `<div class="notice error">${icon("circle-alert")}<span>${escapeHtml(error.message)}</span></div>`, [{ label: "Close", run: closeDialog }], "CHECK RESULT BEFORE RETRYING");
@@ -450,29 +653,32 @@ byId("workspace-search").addEventListener("input", renderWorkspaces);
 byId("workspace-filter").addEventListener("change", renderWorkspaces);
 byId("clear-filter").addEventListener("click", () => { byId("workspace-search").value = ""; byId("workspace-filter").value = "all"; renderWorkspaces(); });
 byId("select-all").addEventListener("change", (event) => {
-    for (const workspace of filteredWorkspaces().filter((item) => item.bound && !item.missing)) {
-        if (event.target.checked) state.selected.add(workspace.id);
-        else state.selected.delete(workspace.id);
-    }
-    renderWorkspaces();
+    const rows = filteredWorkspaces();
+    if (!state.busy) applyWorkspaceSelection(rows, state.selected, rows.map((workspace) => workspace.id), event.target.checked, "select");
+    refreshWorkspaceSelection();
 });
-byId("workspace-rows").addEventListener("change", (event) => {
-    const identifier = event.target.dataset.select;
-    if (!identifier) return;
-    if (event.target.checked) state.selected.add(identifier);
-    else state.selected.delete(identifier);
-    renderWorkspaces();
-});
+byId("workspace-rows").addEventListener("change", changeTreeSelection);
+byId("workspace-rows").addEventListener("toggle", rememberTreeExpansion, true);
+byId("expand-workspaces").addEventListener("click", () => expandWorkspaceTree(true));
+byId("collapse-workspaces").addEventListener("click", () => expandWorkspaceTree(false));
 byId("manage-workspaces").addEventListener("click", showScope);
 byId("settings-scope").addEventListener("click", showScope);
+byId("empty-choose").addEventListener("click", showScope);
 byId("preview-handoff").addEventListener("click", () => handoff(state.mode));
 byId("preview-repair").addEventListener("click", () => handoff("repair"));
 byId("preview-migrate").addEventListener("click", () => handoff("migrate"));
+byId("prepare-links").addEventListener("click", () => handoff("migrate"));
 byId("modal-close").addEventListener("click", closeDialog);
 byId("modal").addEventListener("cancel", (event) => { event.preventDefault(); closeDialog(); });
+byId("modal-body").addEventListener("change", changeTreeSelection);
+byId("modal-body").addEventListener("toggle", rememberTreeExpansion, true);
+for (const identifier of ["store-path", "storage-path"]) {
+    byId(identifier).addEventListener("input", updateSetupLocations);
+    byId(identifier).addEventListener("invalid", () => { byId("setup-advanced").open = true; });
+}
 byId("setup-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    preview({ action: "init", store: byId("store-path").value.trim(), storage: byId("storage-path").value.trim() });
+    scanSetup();
 });
 byId("access-form").addEventListener("submit", (event) => {
     event.preventDefault();

@@ -137,6 +137,37 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(status, 200, snapshot)
         self.assertFalse(snapshot["workspaces"][0]["bound"])
 
+    def test_setup_selects_workspaces_with_one_apply(self):
+        self.panel.config_path = self.root / "new-control/config.json"
+        before = (self.workspace.chats / (SID + ".jsonl")).read_bytes()
+        status, scanned = self.request("/api/scan", {"storage": str(self.config.storage)})
+        self.assertEqual(status, 200, scanned)
+        self.assertEqual(scanned["workspaces"][0]["id"], WID)
+        options = {"action": "init", "store": str(self.root / "new-store"),
+                   "storage": str(self.config.storage), "workspaces": [WID]}
+        self.assertEqual(self.request("/api/preview", {**options, "workspaces": []})[0], 400)
+        status, plan = self.request("/api/preview", options)
+        self.assertEqual(status, 200, plan)
+        self.assertEqual(plan["result"]["bound"], 1)
+        self.assertFalse(self.panel.config_path.exists())
+        self.assertFalse((self.root / "new-store").exists())
+        with patch("copilot_chat_sync.sync.require_closed"):
+            status, result = self.request("/api/apply", {"plan": plan["plan"]})
+        self.assertEqual(status, 200, result)
+        self.assertEqual(Config.load(self.panel.config_path).bindings, [{"id": WID, "uri": URI}])
+        self.assertEqual((self.workspace.chats / (SID + ".jsonl")).read_bytes(), before)
+        self.assertEqual(self.request("/api/apply", {"plan": plan["plan"]})[0], 409)
+
+    def test_setup_preview_rejects_changed_workspace_identity(self):
+        self.panel.config_path = self.root / "new-control/config.json"
+        status, plan = self.request("/api/preview", {"action": "init", "store": str(self.root / "new-store"),
+                                                  "storage": str(self.config.storage), "workspaces": [WID]})
+        self.assertEqual(status, 200, plan)
+        (self.workspace.directory / "workspace.json").write_text(json.dumps({"folder": URI + "-other"}), encoding="utf-8")
+        self.assertEqual(self.request("/api/apply", {"plan": plan["plan"]})[0], 409)
+        self.assertFalse(self.panel.config_path.exists())
+        self.assertFalse((self.root / "new-store").exists())
+
     def test_quarantine_requires_explicit_acknowledgement(self):
         editing = self.workspace.directory / "chatEditingSessions" / SID
         editing.mkdir(parents=True)
