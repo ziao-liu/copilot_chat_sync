@@ -21,6 +21,12 @@ The Windows build collects the Python and bundled package license files from
 the actual build environment. `BUILD_INFO.json` records their versions and the
 source commit. Vendored font/icon sources are listed in `licenses/SOURCES.txt`.
 
+`proxy_tools` 0.1.0 omits its license file from its PyPI package. The build includes
+the unmodified upstream [LICENSE.txt](https://github.com/jtushman/proxy_tools/blob/master/LICENSE.txt)
+from `packaging/licenses/proxy_tools-0.1.0.txt`, verified as Git blob
+`078411c7399fbc0454f36cbe8c8cdbaaba7ebc95`. The source's BSD terms and notices are
+preserved despite the package metadata naming MIT.
+
 The installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php).
 The app and installer are unsigned; SHA256 hashes detect download changes but
 are not a substitute for a trusted publisher signature.

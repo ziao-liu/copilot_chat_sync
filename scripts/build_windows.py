@@ -104,7 +104,8 @@ def main() -> None:
         metadata = distribution(package)
         files = [entry for entry in metadata.files or [] if entry.name.upper().startswith(("LICENSE", "COPYING"))]
         if not files:
-            license_text = metadata.metadata.get("License", "")
+            supplement = root / "packaging/licenses" / f"{package}-{metadata.version}.txt"
+            license_text = supplement.read_text(encoding="utf-8") if supplement.is_file() else metadata.metadata.get("License", "")
             if len(license_text) < 300:
                 raise RuntimeError(f"Distribution license is missing: {package}")
         destination = licenses / package
