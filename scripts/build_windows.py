@@ -131,8 +131,11 @@ def main() -> None:
         smoke_desktop(extracted / "CopilotChatSync/CopilotChatSync.exe", version, output / f"CopilotChatSync-{version}-desktop.png")
     bootstrapper = root / "build/MicrosoftEdgeWebview2Setup.exe"
     environment = dict(os.environ, CCS_BOOTSTRAPPER=str(bootstrapper))
-    download = "$ErrorActionPreference='Stop'; Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $env:CCS_BOOTSTRAPPER; $signature=Get-AuthenticodeSignature -LiteralPath $env:CCS_BOOTSTRAPPER; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation') { throw 'WebView2 bootstrapper does not have a valid Microsoft signature' }"
-    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", download], env=environment, check=True, timeout=120)
+    download = "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $env:CCS_BOOTSTRAPPER; $signature=Get-AuthenticodeSignature -LiteralPath $env:CCS_BOOTSTRAPPER; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation') { throw 'WebView2 bootstrapper does not have a valid Microsoft signature' }"
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", download],
+                            env=environment, capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        raise RuntimeError(f"WebView2 bootstrapper verification failed: {result.stdout}\n{result.stderr}")
     compiler = shutil.which("ISCC.exe") or str(Path(os.environ["ProgramFiles(x86)"]) / "Inno Setup 6/ISCC.exe")
     subprocess.run([compiler, f"/DAppVersion={version}", f"/DBundleDir={bundle}", f"/DOutputDir={output}", f"/DWebViewSetup={bootstrapper}",
                     str(root / "packaging/windows.iss")], cwd=root, check=True)

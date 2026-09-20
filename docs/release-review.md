@@ -3,8 +3,14 @@
 ## v0.1.1 Desktop and Mount-Point Fix
 
 Date: 2026-09-21. Baseline: `3cb9f44`. OpenCodeReview delegation preview selected
-13 files; 12 excluded tests, installer inputs and documents were manually checked.
-`total_files=25`, `reviewed_files=25`, `skipped_files=0`, `coverage_rate=100%`.
+13 files; 13 excluded tests, installer inputs and documents were manually checked.
+`total_files=26`, `reviewed_files=26`, `skipped_files=0`, `coverage_rate=100%`.
+
+The packaging follow-up includes the original upstream license omitted from the
+`proxy_tools` 0.1.0 distribution, verified against its Git blob and tied to that
+exact dependency version. All four files in that follow-up were reviewed, including
+the three excluded by OCR. Runtime bootstrapper downloads use non-interactive basic
+parsing and report PowerShell failures without removing the signature requirement.
 
 The original startup failure was reproduced with an OSError carrying WinError 448.
 Linked chat targets are no longer opened by normal scan/status; inaccessible workspaces
