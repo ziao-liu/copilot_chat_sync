@@ -1,5 +1,32 @@
 # Release Reviews
 
+## v0.1.5 Giant Initial Snapshots
+
+The v0.1.4 large-log tests did not cover an initial snapshot above 128 MiB.
+The reported first-line failure is reproduced by a physical, single-string
+135,266,484-byte initial record, not just a large accumulated log. It now
+completes Send/Receive, immutable store reload, re-send, plain JSON export and
+checksummed raw backup/restore. A 537,919,668-byte first record followed by a
+small replacement mutation also completes that chain. Local sampled peak RSS
+was 286.0 MiB and 1056.5 MiB respectively. The >513 MiB first record also passes
+with the giant string retained through the complete chain, at 1054.0 MiB RSS.
+Cumulative-log coverage still passes at 32.3 MiB RSS. CI repeats all four scenarios.
+
+Parsing uses bundled ijson/YAJL with strict one-record-per-line framing and
+256-level nesting checks. Canonical serialization streams string escaping,
+hashing and atomic writes; compatibility tests preserve existing revision hashes.
+Native JSON, records, replayed state, compact imports and shared envelopes use
+the same 2 GiB ceiling. Periodic RSS checks reject resource exhaustion explicitly;
+the live model remains in RAM, and allocation between checks can exceed the soft
+budget. This is not a guarantee for arbitrary multi-gigabyte chats on low-RAM PCs.
+
+Windows packaging collects the parser backends and licenses. The actual bundled
+CLI reads a >129 MiB first record during portable and installer verification.
+Conflict previews are bounded and visibly labelled; stored/exported/synced chats
+are not shortened. Program replacement and configuration/backup retention remain
+gated. Real user-file compatibility and two-PC cloud/native continuation still
+require a pilot; synthetic tests do not claim those outcomes.
+
 ## v0.1.4 Large JSONL Logs and Project Hierarchy
 
 The previous 128 MiB whole-file read rejected otherwise replayable large native

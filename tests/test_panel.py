@@ -67,6 +67,20 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.request("/api/state", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
         self.assertEqual(self.request("/api/state", headers={"Authorization": "Bearer \u00e9"})[0], 401)
 
+    def test_conflict_preview_is_bounded_without_truncating_stored_chat(self):
+        data = normalize(sample("x" * 5000), SID)
+        data["requests"] *= 101
+        data["requests"][-1] = {"message": "Final", "response": [{"value": "y" * 5000}]}
+        store = Store(self.config.store).load()
+        revision = store.publish(data, [], self.config.device)
+        status, preview = self.request(f"/api/revision?session={SID}&revision={revision.revision}")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(preview["requests"]), 100)
+        self.assertTrue(preview["previewTruncated"])
+        self.assertEqual(preview["requests"][-1]["response"], "y" * 4000)
+        self.assertEqual(len(Store(self.config.store).load().chosen(SID).session["requests"]), 101)
+        self.assertEqual(store.chosen(SID).session["requests"][-1]["response"][0]["value"], "y" * 5000)
+
     def test_preview_is_read_only_and_apply_requires_a_ticket(self):
         result = self.preview()
         self.assertEqual(result["result"]["would_publish"], 1)

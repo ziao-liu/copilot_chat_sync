@@ -296,7 +296,41 @@ class Panel:
         revision = Store(config.store).load().graphs.get(identifier, {}).get(revision_id)
         if revision is None:
             raise PanelError("Revision not found", 404)
-        return revision.session
+        data = revision.session
+        truncated = len(data["requests"]) > 100
+
+        def parts(value: object) -> Iterator[str]:
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, list):
+                for item in value:
+                    yield from parts(item)
+            elif isinstance(value, dict):
+                for key in ("text", "value"):
+                    if isinstance(value.get(key), str):
+                        yield value[key]
+                        return
+                for key in ("content", "pastTenseMessage"):
+                    if value.get(key):
+                        yield from parts(value[key])
+                        break
+
+        def text(value: object) -> str:
+            nonlocal truncated
+            result: list[str] = []
+            remaining = 4000
+            for part in parts(value):
+                result.append(part[:remaining])
+                if len(part) > remaining:
+                    truncated = True
+                    break
+                remaining -= len(part)
+            return "".join(result)
+
+        requests = [{"message": text(request["message"]), "response": text(request.get("response"))}
+                    for request in data["requests"][-100:]]
+        return {"customTitle": (data.get("customTitle") or data.get("computedTitle") or "")[:1000],
+                "requests": requests, "previewTruncated": truncated}
 
 
 class PanelServer(ThreadingHTTPServer):

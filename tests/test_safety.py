@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from copilot_chat_sync.safety import atomic_copy, code_processes, is_redirect, local_lock, plain_path
+from copilot_chat_sync.safety import atomic_copy, atomic_write_chunks, code_processes, is_redirect, local_lock, plain_path
 from copilot_chat_sync import __version__
 from copilot_chat_sync.sessions import SyncError, file_digest, native_bytes, normalize
 from copilot_chat_sync.store import Store
@@ -18,6 +18,21 @@ from test_workspace import URI, WID, make_workspace
 
 
 class SafetyTests(unittest.TestCase):
+    def test_failed_streamed_serialization_preserves_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "snapshot.json"
+            target.write_bytes(b"original")
+
+            def chunks():
+                yield b'{"partial":'
+                raise SyncError("Insufficient memory")
+
+            with self.assertRaisesRegex(SyncError, "Insufficient memory"):
+                atomic_write_chunks(target, chunks())
+            self.assertEqual(target.read_bytes(), b"original")
+            self.assertFalse(list(root.glob(".pending-*")))
+
     def test_streaming_copy_checks_hash_before_replacing_destination(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

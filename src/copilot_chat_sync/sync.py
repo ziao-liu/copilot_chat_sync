@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 from .index import merge_keys, read_keys
 from .safety import atomic_copy, atomic_write, is_redirect, local_lock, plain_path, require_closed
-from .sessions import SyncError, canonical_bytes, digest, file_digest, json_loads, load_session, native_bytes, read_stable
+from .sessions import SyncError, canonical_bytes, digest, file_digest, json_loads, load_session, native_document, read_stable
 from .store import REVISION_ID, Store
 from .transaction import FileUpdate, WorkspaceUpdate, apply_updates, fingerprint, new_backup_id, require_recovered, restore_backup
 from .workspace import Config, Workspace, workspace_id
@@ -123,7 +123,7 @@ def pull(config: Config, apply: bool = False, selected: list[str] | None = None,
                 imported[identifier] = incoming
                 if data is None or digest(data) != head.content_hash:
                     path = paths.get(identifier, workspace.chats / (identifier + ".jsonl"))
-                    files.append(FileUpdate(path, native_bytes(incoming, path.suffix), fingerprint(path)))
+                    files.append(FileUpdate(path, native_document(incoming, path.suffix), fingerprint(path)))
                 state["workspaces"].setdefault(workspace.identifier, {})[identifier] = head.revision
             if imported:
                 updates.append(_update(workspace, imported, files, detach))

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from copilot_chat_sync.sessions import SyncError, _json_size, canonical_bytes, digest, file_chunks, file_digest, load_session, metadata, native_bytes, normalize, parse_log
+from copilot_chat_sync.sessions import SyncError, _json_size, canonical_bytes, canonical_chunks, digest, file_chunks, file_digest, load_json, load_session, metadata, native_bytes, normalize, parse_log
 
 SID = "11111111-1111-4111-8111-111111111111"
 
@@ -102,9 +102,9 @@ class SessionTests(unittest.TestCase):
             expected = parse_log(iter(lines))
             sizes.append(_json_size(expected))
             limit = max(sizes)
-            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", limit):
+            with patch("copilot_chat_sync.sessions.MAX_SNAPSHOT_BYTES", limit):
                 self.assertEqual(parse_log(iter(lines)), expected)
-            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", limit - 1):
+            with patch("copilot_chat_sync.sessions.MAX_SNAPSHOT_BYTES", limit - 1):
                 with self.assertRaisesRegex(SyncError, "Replayed session"):
                     parse_log(iter(lines))
 
@@ -112,17 +112,69 @@ class SessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / (SID + ".jsonl")
             path.write_bytes(native_bytes(sample()) + canonical_bytes({"kind": 1, "k": ["customTitle"], "v": "x" * 400}) + b"\n")
-            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 300):
-                with self.assertRaisesRegex(SyncError, "record at line 2"):
+            with patch("copilot_chat_sync.sessions.MAX_SNAPSHOT_BYTES", 300):
+                with self.assertRaisesRegex(SyncError, "line 2.*record exceeds"):
                     load_session(path)
             with patch("copilot_chat_sync.sessions.MAX_LOG_BYTES", path.stat().st_size - 1):
                 with self.assertRaisesRegex(SyncError, "File exceeds"):
                     load_session(path)
                 with self.assertRaisesRegex(SyncError, "File exceeds"):
                     file_digest(path)
-            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 100):
+            with patch("copilot_chat_sync.sessions.MAX_SNAPSHOT_BYTES", 100):
                 with self.assertRaisesRegex(SyncError, "Compacted session"):
                     native_bytes(normalize(sample(), SID))
+
+    def test_streamed_canonical_bytes_preserve_existing_revision_hashes(self):
+        values = [sample(), {}, [], {1: "number"}, {None: True}, {"a": '"\\\n\r\t\b\f\u4e2d\U0001f600' * 20000,
+                  "numbers": [2**80, -0.0, 1.25e-100, None, False, True]}]
+        for value in values:
+            with self.subTest(type=type(value)):
+                self.assertEqual(b"".join(canonical_chunks(value)), canonical_bytes(value))
+
+    def test_streaming_framing_numbers_and_blank_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / (SID + ".jsonl")
+            data = sample()
+            data["requests"][0]["extra"] = [2**80, 1.25e-100, -0.0]
+            initial = canonical_bytes({"kind": 0, "v": data})
+            path.write_bytes(b"\xef\xbb\xbf \r\n" + initial + b'\n \t\r\n{"kind":1,"k":["customTitle"],"v":"Final"}')
+            self.assertEqual(load_session(path)["requests"], data["requests"])
+            for suffix in (b' {}', b'\n{"kind":1,"k":["x"],"v":1e400}', b'\n{"kind":1,\n"k":["x"],"v":0}'):
+                path.write_bytes(initial + suffix)
+                with self.assertRaises(SyncError):
+                    load_session(path)
+
+    def test_initial_snapshot_is_not_subject_to_metadata_read_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for suffix in (".jsonl", ".json"):
+                path = Path(directory) / (SID + suffix)
+                path.write_bytes(native_bytes(sample("x" * 2048), suffix))
+                with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 128):
+                    self.assertEqual(load_session(path)["requests"][0]["message"]["text"], "x" * 2048)
+
+    def test_resource_guard_fails_explicitly_without_modifying_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / (SID + ".jsonl")
+            original = native_bytes(sample())
+            path.write_bytes(original)
+            with patch("copilot_chat_sync.sessions.MAX_PROCESS_BYTES", 1):
+                with self.assertRaisesRegex(SyncError, "Insufficient memory"):
+                    load_session(path)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_writer_and_reader_have_the_same_nesting_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested.json"
+            data = []
+            for _ in range(255):
+                data = [data]
+            path.write_bytes(b"".join(canonical_chunks(data)))
+            self.assertEqual(load_json(path), data)
+            with self.assertRaisesRegex(SyncError, "nesting exceeds"):
+                b"".join(canonical_chunks([data]))
+            path.write_bytes(b"[" * 257 + b"]" * 257)
+            with self.assertRaisesRegex(SyncError, "nesting exceeds"):
+                load_json(path)
 
     def test_chunk_reader_detects_changed_source(self):
         with tempfile.TemporaryDirectory() as directory:

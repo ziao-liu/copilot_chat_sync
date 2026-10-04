@@ -69,6 +69,8 @@ async function main() {
     assert.strictEqual(h.run("workspaceLabel({uri: 'file:///C:/project'})"), "本机 · /C:/project");
     assert.strictEqual(h.run("escapeHtml('<script>\"&')"), "&lt;script&gt;&quot;&amp;");
     assert(h.run("friendlyError(new Error('JSONL record at line 1 exceeds 128 MiB'))").includes("没有截断或删除"));
+    assert(h.run("friendlyError(new Error('JSON record exceeds 2 GiB'))").includes("2 GiB"));
+    assert(h.run("friendlyError(new Error('Insufficient memory for this conversation'))").includes("更多内存"));
     assert(h.run("friendlyError(new Error('File exceeds 8589934592 bytes'))").includes("8 GiB"));
     assert.strictEqual(h.run("blockedReason(snapshot)"), "");
     h.context.snapshot.workspaces.push({ ...project, id: "two" });

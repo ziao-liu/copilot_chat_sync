@@ -31,6 +31,12 @@ jobs:
       - name: Verify a real log above 512 MiB and bounded memory
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: python tests/check_large_log.py
+      - name: Verify giant FIRST records and retained shared snapshots
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          python tests/check_large_snapshot.py
+          python tests/check_large_snapshot.py --mib 513 --shrink
+          python tests/check_large_snapshot.py --mib 513
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

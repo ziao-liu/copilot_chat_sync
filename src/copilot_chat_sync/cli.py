@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlsplit
 from . import __version__
 from .index import INDEX, merge_keys, read_keys
 from .safety import code_processes, is_redirect
-from .sessions import SyncError, canonical_bytes, json_loads, metadata
+from .sessions import SyncError, canonical_chunks, json_loads, metadata
 from .store import Store
 from .sync import migrate, operation, pull, push, repair, resolve, restore
 from .transaction import list_backups
@@ -194,10 +194,15 @@ def dispatch(args: argparse.Namespace) -> dict:
         return functions[args.command](config, **options)
     if args.command == "conflicts":
         store = Store(config.store).load()
-        return {"conflicts": [{"session": identifier, "heads": [
-            {"revision": head.revision, "writer": head.writer, "requests": len(head.session["requests"]),
-             "last_message_date": metadata(head.session)["lastMessageDate"]} for head in heads]}
-            for identifier, heads in store.conflicts().items()]}
+        conflicts = []
+        for identifier, heads in store.conflicts().items():
+            summaries = []
+            for head in heads:
+                data = head.session
+                summaries.append({"revision": head.revision, "writer": head.writer, "requests": len(data["requests"]),
+                                  "last_message_date": metadata(data)["lastMessageDate"]})
+            conflicts.append({"session": identifier, "heads": summaries})
+        return {"conflicts": conflicts}
     if args.command == "resolve":
         return resolve(config, args.session, args.revision, args.apply)
     if args.command == "backups":
@@ -217,7 +222,13 @@ def dispatch(args: argparse.Namespace) -> dict:
         if args.apply:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             with args.output.open("xb") as stream:
-                stream.write(canonical_bytes(revision.session) + b"\n")
+                try:
+                    for chunk in canonical_chunks(revision.session, newline=True):
+                        stream.write(chunk)
+                except BaseException:
+                    stream.close()
+                    args.output.unlink()
+                    raise
         return {"operation": "export-revision", "applied": args.apply, "output": str(args.output), "revision": revision.revision}
     raise SyncError("Unknown command")
 

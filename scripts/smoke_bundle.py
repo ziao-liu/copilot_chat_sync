@@ -142,6 +142,25 @@ def smoke(command: list[str], version: str) -> None:
                 raise RuntimeError("Demo allowed synchronization")
             if request("/api/preview", {}, request_origin="https://example.invalid")[0] != 403:
                 raise RuntimeError("Cross-origin API access was allowed")
+            config = json.loads(Path(state["config_path"]).read_text(encoding="utf-8"))
+            chats = Path(config["storage"]) / selected[0] / "chatSessions"
+            chats.mkdir(exist_ok=True)
+            identifier = "33333333-3333-4333-8333-333333333333"
+            giant = chats / (identifier + ".jsonl")
+            with giant.open("wb") as stream:
+                stream.write(('{"kind":0,"v":{"version":3,"sessionId":"' + identifier +
+                              '","creationDate":1000,"initialLocation":"panel","requests":[{"message":{"text":"').encode())
+                chunk = b"x" * (1024 * 1024)
+                for _ in range(129):
+                    stream.write(chunk)
+                stream.write(b'"}}]}}\n')
+            validation = subprocess.run([*command, "--config", state["config_path"], "doctor"],
+                                        cwd=root, env=environment, capture_output=True, text=True, timeout=120)
+            diagnostics = json.loads(validation.stdout) if validation.stdout else {}
+            expected_issues = ["Resolve divergent shared histories before pulling"]
+            if validation.returncode != 2 or diagnostics.get("issues") != expected_issues:
+                raise RuntimeError("Bundled parser failed a real first record above 128 MiB: " + validation.stdout)
+            giant.unlink()
         finally:
             if process.poll() is None:
                 process.terminate()

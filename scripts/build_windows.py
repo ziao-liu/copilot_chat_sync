@@ -105,7 +105,7 @@ def main() -> None:
     numbers = tuple(int(part) for part in version.split(".")) + (0,)
     resource.write_text(f"VSVersionInfo(ffi=FixedFileInfo(filevers={numbers!r}, prodvers={numbers!r}, mask=0x3f, flags=0, OS=0x40004, fileType=0x1, subtype=0, date=(0,0)), kids=[StringFileInfo([StringTable('040904B0', [StringStruct('CompanyName', 'ziao-liu'), StringStruct('FileDescription', 'Copilot Chat Sync desktop app'), StringStruct('FileVersion', {version!r}), StringStruct('ProductName', 'Copilot Chat Sync'), StringStruct('ProductVersion', {version!r})])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])])", encoding="utf-8")
     common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--noupx",
-              "--collect-data=copilot_chat_sync", "--hidden-import=psutil._psutil_windows", "--version-file", str(resource),
+              "--collect-data=copilot_chat_sync", "--collect-all=ijson", "--hidden-import=psutil._psutil_windows", "--version-file", str(resource),
               "--distpath", str(root / "dist"), "--workpath", str(root / "build"), "--specpath", str(root / "build")]
     subprocess.run([*common, "--windowed", "--name=CopilotChatSync", "--collect-data=webview",
                     "--hidden-import=webview.platforms.winforms", "--hidden-import=webview.platforms.edgechromium",
@@ -126,7 +126,7 @@ def main() -> None:
     if not python_license.is_file():
         raise RuntimeError("Python distribution license is missing")
     shutil.copy2(python_license, licenses / "Python-LICENSE.txt")
-    for package in ("psutil", "pyinstaller", "pywebview", "pythonnet", "clr_loader", "cffi", "pycparser", "bottle", "proxy_tools", "typing_extensions"):
+    for package in ("psutil", "ijson", "pyinstaller", "pywebview", "pythonnet", "clr_loader", "cffi", "pycparser", "bottle", "proxy_tools", "typing_extensions"):
         metadata = distribution(package)
         files = [entry for entry in metadata.files or [] if entry.name.upper().startswith(("LICENSE", "COPYING"))]
         if not files:
@@ -145,7 +145,8 @@ def main() -> None:
         shutil.copy2(vendor / filename, licenses / filename)
     build_info = {"version": version, "commit": os.environ.get("GITHUB_SHA", "local"), "target": "windows-x64",
                   "python": platform.python_version(), "pyinstaller": distribution("pyinstaller").version,
-                  "psutil": distribution("psutil").version, "desktop": "WebView2", "pywebview": distribution("pywebview").version, "signed": False}
+                  "psutil": distribution("psutil").version, "ijson": distribution("ijson").version,
+                  "desktop": "WebView2", "pywebview": distribution("pywebview").version, "signed": False}
     (bundle / "BUILD_INFO.json").write_text(json.dumps(build_info, indent=2) + "\n", encoding="utf-8")
     portable = Path(shutil.make_archive(str(output / f"CopilotChatSync-{version}-windows-x64-portable"),
                                        "zip", root_dir=bundle.parent, base_dir=bundle.name))

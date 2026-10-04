@@ -1,19 +1,26 @@
-# v0.1.4 Large-Log and Project-Picker Preview
+# v0.1.5 Giant Initial Snapshot Preview
 
 Windows x64 preview of Copilot Chat Sync, an unofficial tool for legacy
 VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Changes
 
-- Native JSONL logs are replayed incrementally instead of reading the whole file.
-  Logs up to 8 GiB are supported; individual records, replayed live state and
-  compact/shared snapshots retain a 128 MiB safety limit.
-- Large append-only logs no longer fail merely because total file size exceeds
-  128 MiB. Sending publishes the reconstructed chat without rewriting the original log.
+- Fixes `JSONL record at line 1 exceeds 128 MiB`: initial records now use an
+  incremental JSON parser, including giant individual strings. The limit is
+  consistent across native JSON, records, live state, shared revisions and
+  compact imports: 2 GiB. Total native JSONL logs retain an 8 GiB ceiling.
+- Canonical serialization, hashing, publication, import and export stream output,
+  including string escaping, instead of building giant serialized byte copies.
+  Existing shared format and revision hashes remain compatible.
 - File hashing, raw backups, restore/rollback and old-link migration use checksummed
   chunk copies, preserving all original bytes without whole-log buffering.
-- Oversized records/live snapshots fail explicitly before an unreadable revision
-  is published. Malformed logs, changed sources, conflicts and recovery protections remain.
+- Malformed records, non-finite numbers, changed sources, conflicts and recovery
+  protections remain. Capacity errors are explicit; no chat content is silently skipped.
+- Live data still requires RAM. Periodic RSS checks use the lower of 2 GiB or
+  starting RSS plus half the available RAM. Allocations can temporarily exceed
+  these soft checks, and low-RAM computers can reject files below the size ceiling.
+- Conflict preview shows at most the last 100 turns and 4000 characters per
+  message/reply, with a visible notice. Synced/exported data is not shortened.
 - Project selection uses expandable server/folder hierarchies with sibling directories
   shown alongside each other. One radio selection binds one workspace; parent folders
   do not select every child. SSH aliases and duplicate workspaces stay separate.
@@ -23,10 +30,10 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Downloads
 
-- `CopilotChatSync-0.1.4-windows-x64-Setup.exe`: installer; no Python required.
-- `CopilotChatSync-0.1.4-windows-x64-portable.zip`: extract the entire folder and
+- `CopilotChatSync-0.1.5-windows-x64-Setup.exe`: installer; no Python required.
+- `CopilotChatSync-0.1.5-windows-x64-portable.zip`: extract the entire folder and
   open `CopilotChatSync.exe`. Keep all files together.
-- `CopilotChatSync-0.1.4-desktop.png`: actual Windows CI screenshot with synthetic data.
+- `CopilotChatSync-0.1.5-desktop.png`: actual Windows CI screenshot with synthetic data.
 - `SHA256SUMS.txt`: download integrity checksums.
 
 **Upgrade:** close the app, then run the new Setup into the same directory.
@@ -36,10 +43,16 @@ into a new folder to avoid leftover old runtime files.
 
 ## Validation and Limits
 
-Real synthetic logs of 537,947,484 bytes and 2,147,594,534 bytes passed local
-Send/Receive, complete raw backup/restore and POSIX migration with sampled peak RSS
-of 33.7 MiB. CI repeats the above-513-MiB check and gates publication on the full
-test matrix and actual Windows packaging, rendering and installation checks.
+Physical synthetic FIRST records of 135,266,484 bytes (retained giant chat) and
+537,919,668 bytes (later reduced by a valid mutation) passed local Send/Receive,
+shared reload, re-send, plain JSON export and complete raw backup/restore.
+Sampled peak RSS was 286.0 MiB and 1056.5 MiB respectively. The cumulative
+537,947,484-byte log regression also passed at 32.3 MiB RSS.
+A retained 537,919,668-byte first record also passed the entire chain, including
+giant shared revisions and received/exported chats, at 1054.0 MiB peak RSS.
+CI repeats all four checks, and Windows packaging verifies a >129 MiB first record
+using the actual executable. Publication is gated on the full test matrix,
+native rendering and same-directory installation checks.
 These checks do not validate every real VS Code format or prove cloud delivery.
 
 - Only legacy extension-host chats are supported, not Agent Host/CLI sessions.

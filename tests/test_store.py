@@ -74,7 +74,7 @@ class StoreTests(unittest.TestCase):
 
     def test_oversized_revision_is_not_written_even_in_preview(self):
         for preview in (True, False):
-            with patch("copilot_chat_sync.store.MAX_SESSION_BYTES", 10):
+            with patch("copilot_chat_sync.store.MAX_SNAPSHOT_BYTES", 10):
                 with self.assertRaisesRegex(SyncError, "Shared revision exceeds"):
                     self.store.publish(normalize(sample(), SID), [], WRITER, dry_run=preview)
             self.assertFalse((self.root / "revisions").exists())

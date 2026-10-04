@@ -8,15 +8,15 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-Version 0.1.4 has a compact Chinese-language, single-page interface, expandable
-project folders and streaming support for large native JSONL logs.
+Version 0.1.5 has a compact Chinese-language, single-page interface, expandable
+project folders and streaming support for large native logs and initial snapshots.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.4)
-  and download `CopilotChatSync-0.1.4-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.5)
+  and download `CopilotChatSync-0.1.5-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -92,16 +92,20 @@ paths are shortened on the main page; hover or open Settings to see the full pat
 
 ## Large Chat Logs
 
-Native `.jsonl` logs are replayed line by line (up to 8 GiB), so a 512 MiB-2 GiB
-append-only log no longer hits the old 128 MiB whole-file reader limit.
+Native `.jsonl` logs are replayed incrementally (up to 8 GiB), including initial
+snapshots larger than 128 MiB. JSON records, the replayed state, native JSON,
+compact imports and shared revisions now have a consistent 2 GiB ceiling.
 Sending does not rewrite or truncate the source log; it publishes the resulting
 conversation snapshot. Raw backups, restoration and old-link migration use
 checksummed chunk copies, retaining the complete original log.
 
-Individual JSONL records, the replayed live state and compact/shared snapshots
-still have a 128 MiB safety limit. These are different from total log size:
-a huge single record or a genuinely huge conversation still fails explicitly.
-Large-log replay may take several minutes. Keep VS Code closed throughout.
+The live chat still needs RAM; this is not a disk-backed replay engine. Memory
+checks stop at 2 GiB process RSS or half the initially available RAM added to
+current RSS, whichever is lower. Token/object allocation can temporarily exceed
+these checks, so file-size support is not a guarantee on every computer.
+Capacity failures are explicit and never truncate chats. Large-log replay may
+take minutes; keep VS Code closed throughout. Conflict previews show at most
+100 turns and 4000 characters per message/reply, without shortening synced data.
 
 ## More
 

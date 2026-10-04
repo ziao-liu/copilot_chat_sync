@@ -6,6 +6,7 @@ Copilot Chat Sync is MIT-licensed. Bundled components keep their own licenses:
 | ------------------------------ | ------------------------------------------------------- | ----------------------------- |
 | CPython and standard library   | Python Software Foundation License and included notices | `licenses/Python-LICENSE.txt` |
 | psutil                         | BSD-3-Clause                                            | `licenses/psutil/`            |
+| ijson and bundled YAJL parser  | BSD-3-Clause and ISC                                     | `licenses/ijson/`             |
 | PyInstaller bootloader/runtime | GPL-2.0-or-later with distribution exception            | `licenses/pyinstaller/`       |
 | Lucide 0.468.0                 | ISC                                                     | `licenses/lucide-LICENSE`     |
 | IBM Plex Sans                  | SIL Open Font License 1.1                               | `licenses/plex-LICENSE`       |

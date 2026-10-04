@@ -25,7 +25,7 @@ case-sensitive remote paths are not automatically paired or rewritten.
 
 ## Command-Line Setup
 
-The Windows release includes Python and `psutil`; run `CopilotChatSync.exe` without
+The Windows release includes Python, `psutil` and `ijson`; run `CopilotChatSync.exe` without
 arguments to open the native WebView2 application window. Use `CopilotChatSync-CLI.exe`
 for the CLI arguments shown below. The browser panel remains available via the CLI's
 `panel` command. Desktop startup failures appear in a native error dialog.
@@ -246,9 +246,14 @@ errors go to stderr. Exit codes: `0` success/preview, `2` validation/safety/I/O 
 - Shared format is version 1, using immutable, checksummed full snapshots. No garbage
   collector exists. Historical payloads load lazily but verification reads all revisions.
   Oversized/truncated files fail explicitly. Native JSONL logs are replayed
-  incrementally, with an 8 GiB total-log limit and a 128 MiB per-record/live-state
-  limit. Plain native JSON, compact imports and shared revision files remain
-  limited to 128 MiB. Sending leaves the original native log unchanged.
+  incrementally, including giant initial records, with an 8 GiB total-log limit.
+  Records, replayed state, plain JSON, compact imports and shared revisions have
+  a 2 GiB ceiling. Metadata files retain a separate 128 MiB reader limit.
+  Live objects still require RAM: periodic RSS checks use the lower of 2 GiB or
+  current RSS plus half the available memory when each parser/encoder starts.
+  These are soft checks, not an OS-enforced bound; a large token/object can allocate
+  between checks. JSON nesting is limited to 256 levels. Low-memory computers
+  may reject files below the size ceiling. Sending leaves the original log unchanged.
   Raw backup, restore, hashing and migration stream 1 MiB chunks, with full
   checksums and changed-source detection before replacement.
 - Deletions do not propagate. A later receive can restore a locally deleted chat.
@@ -273,19 +278,25 @@ Microsoft/GitHub product or a real-time sync service.
 Open this repository as its own VS Code folder for its `src` paths and unittest settings.
 Node is only needed for frontend tests; it is not a runtime dependency.
 
-python tests/check_large_log.py
-```
-
-The large-log check writes a real synthetic log above 513 MiB, verifies Send/Receive,
-raw backup/restore and POSIX migration, and samples process RSS below 256 MiB.
-Use `--mib 2048` to verify a log above 2 GiB. Temporary files are cleaned automatically.
-CI runs the 513 MiB check on Linux/Python 3.12. Windows packaging also reinstalls
-into the same directory, verifies stale program replacement and preserves config/backups.bash
+```bash
 python -m pip install .
 python -m unittest discover -s tests -v
 node tests/test_frontend.js
+python tests/check_large_log.py
+python tests/check_large_snapshot.py
+python tests/check_large_snapshot.py --mib 513 --shrink
+python tests/check_large_snapshot.py --mib 513
 python -m pip wheel --no-deps --wheel-dir dist .
 ```
+
+The log check exercises a physical cumulative log above 513 MiB with RSS below
+256 MiB; `--mib 2048` checks a log above 2 GiB. The snapshot checks use a giant
+single string in the first record: >129 MiB and >513 MiB retained through shared
+revisions, receive and export, plus >513 MiB replaced by a later mutation. All verify full
+raw backup/restore and unchanged sends; temporary fixtures are cleaned automatically.
+CI runs all four checks on Linux/Python 3.12. Windows packaging also verifies
+a >129 MiB first record using the actual executable and reinstalls into the same
+directory, checking stale program replacement and preservation of config/backups.
 
 Tests use temporary native SQLite/chat fixtures. CI targets Linux, Windows and macOS;
 Windows-only tests cover NTFS junctions and the PowerShell launcher. A configured

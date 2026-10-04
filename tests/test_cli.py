@@ -13,9 +13,11 @@ from unittest.mock import Mock, patch
 
 from copilot_chat_sync.cli import main
 from copilot_chat_sync import __version__
+from copilot_chat_sync.sessions import SyncError, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.workspace import Config
 from test_workspace import URI, WID, make_workspace
+from test_sessions import SID, sample
 
 
 class CliTests(unittest.TestCase):
@@ -35,6 +37,26 @@ class CliTests(unittest.TestCase):
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             code = main(["--config", str(self.config), *args])
         return code, output.getvalue(), errors.getvalue()
+
+    def test_failed_streamed_export_removes_only_its_partial_output(self):
+        config = Config(self.config, self.root / "shared", self.storage, bindings=[{"id": WID, "uri": URI}])
+        config.save()
+        store = Store(config.store)
+        store.initialize()
+        store.publish(normalize(sample(), SID), [], config.device)
+        output = self.root / "export.json"
+
+        def chunks(*args, **kwargs):
+            yield b'{"partial":'
+            raise SyncError("Insufficient memory")
+
+        with patch("copilot_chat_sync.cli.canonical_chunks", side_effect=chunks):
+            code, result, errors = self.run_cli("export-revision", SID, "--output", str(output), "--apply")
+        self.assertEqual(code, 2)
+        self.assertIn("Insufficient memory", errors)
+        self.assertEqual(result, "")
+        self.assertFalse(output.exists())
+        self.assertEqual(Store(config.store).load().chosen(SID).session["requests"], sample()["requests"])
 
     def test_scan_reports_actual_uri(self):
         code, output, errors = self.run_cli("scan", "--storage-root", str(self.storage))

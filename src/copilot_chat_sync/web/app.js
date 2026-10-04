@@ -111,8 +111,11 @@ function dateLabel(value) {
 
 function friendlyError(error) {
     const message = error.message || String(error);
-    if (/JSONL record at line|Replayed session exceeds|Compacted session exceeds|Shared revision exceeds/.test(message)) {
-        return "日志可以很大，但单条操作或重放后的聊天内容超过 128 MiB 时仍无法安全同步。记录没有截断或删除，请查看技术信息。";
+    if (/JSONL record at line|JSON record exceeds|JSON snapshot exceeds|Replayed session exceeds|Compacted session exceeds|Shared revision exceeds|File exceeds 2147483648/.test(message)) {
+        return "单条操作或重放后的聊天快照超过 2 GiB，无法安全同步。记录没有截断或删除，请查看技术信息。";
+    }
+    if (/Insufficient memory|MemoryError/.test(message)) {
+        return "这段聊天需要更多内存。请关闭其他应用后重试，或在内存更大的电脑上同步。原始记录没有截断或删除。";
     }
     if (/File exceeds 8589934592|JSONL log exceeds/.test(message)) return "聊天日志超过 8 GiB 安全上限，暂不支持同步。原文件未删除或截断。";
     if (message.includes("Unpublished local changes")) return "本机有未发送的修改。请先发送，再接收。";
@@ -415,7 +418,7 @@ function textOf(value) {
 function readRevision(session, revision) {
     task(async () => {
         const data = await api(`/api/revision?session=${encodeURIComponent(session)}&revision=${encodeURIComponent(revision)}`);
-        dialog(data.customTitle || "聊天内容", `${data.requests.length > 100 ? "<p class=\"notice\">仅显示最后 100 轮，原始记录没有截断。</p>" : ""}
+        dialog(data.customTitle || "聊天内容", `${data.previewTruncated ? "<p class=\"notice\">预览最多显示最后 100 轮，每段最多 4000 字；同步的原始记录没有截断。</p>" : ""}
             ${data.requests.slice(-100).map((request) => `<article class="transcript"><h3>你</h3>${escapeHtml(textOf(request.message))}<h3>Copilot</h3>${escapeHtml(textOf(request.response) || "无文字回复")}</article>`).join("")}`,
             [{ label: "返回冲突选择", run: showConflicts }]);
     });

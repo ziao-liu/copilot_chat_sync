@@ -8,7 +8,7 @@ import stat
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 from .sessions import SyncError, file_chunks
 
@@ -39,11 +39,16 @@ def plain_path(path: Path, root: Path) -> Path:
 
 
 def atomic_write(path: Path, data: bytes) -> None:
+    atomic_write_chunks(path, [data])
+
+
+def atomic_write_chunks(path: Path, chunks: Iterable[bytes]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
+            for chunk in chunks:
+                stream.write(chunk)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

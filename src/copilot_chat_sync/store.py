@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .safety import atomic_write, is_regular, plain_path
-from .sessions import MAX_SESSION_BYTES, SyncError, canonical_bytes, digest, json_loads, normalize, read_stable, session_id
+from .safety import atomic_write, atomic_write_chunks, is_regular, plain_path
+from .sessions import MAX_SNAPSHOT_BYTES, SyncError, _json_size, canonical_bytes, canonical_chunks, chunks_digest, digest, file_digest, json_loads, load_json, normalize, read_stable, session_id
 
 REVISION_ID = re.compile(r"[0-9a-f]{64}\Z")
 MARKER = {"format": "copilot-chat-sync", "version": 1}
@@ -29,7 +29,7 @@ class Revision:
             return self.data
         if self.path is None:
             raise SyncError("Revision has no payload")
-        envelope = json_loads(read_stable(self.path).decode("utf-8"))
+        envelope = load_json(self.path)
         if digest(envelope) != self.revision:
             raise SyncError(f"Revision changed after scanning: {self.path}")
         return envelope["session"]
@@ -71,7 +71,7 @@ class Store:
                         plain_path(path, self.root)
                         if path.suffix != ".json" or not REVISION_ID.fullmatch(path.stem) or not is_regular(path):
                             raise SyncError(f"Unexpected revision/conflict copy: {path}")
-                        envelope = json_loads(read_stable(path).decode("utf-8"))
+                        envelope = load_json(path)
                         if not isinstance(envelope, dict) or set(envelope) != {"schema", "parents", "session", "writer"} or envelope["schema"] != 1:
                             raise SyncError(f"Unsupported revision format: {path}")
                         if digest(envelope) != path.stem:
@@ -121,16 +121,15 @@ class Store:
         if set(parents) - graph.keys():
             raise SyncError(f"The last synced revision is not downloaded for {identifier}; wait for OneDrive")
         envelope = {"schema": 1, "session": data, "parents": sorted(set(parents)), "writer": writer}
+        if _json_size(envelope) + 1 > MAX_SNAPSHOT_BYTES:
+            raise SyncError("Shared revision exceeds 2 GiB after replay; no oversized revision was written")
         revision_id = digest(envelope)
         path = plain_path(self.root / "revisions" / identifier / (revision_id + ".json"), self.root)
-        content = canonical_bytes(envelope) + b"\n"
-        if len(content) > MAX_SESSION_BYTES:
-            raise SyncError("Shared revision exceeds 128 MiB after replay; no oversized revision was written")
         if path.exists():
-            if read_stable(path) != content:
+            if file_digest(path) != chunks_digest(canonical_chunks(envelope, newline=True)):
                 raise SyncError(f"Refusing to replace a non-identical immutable revision: {path}")
         elif not dry_run:
-            atomic_write(path, content)
+            atomic_write_chunks(path, canonical_chunks(envelope, newline=True))
         revision = Revision(revision_id, tuple(envelope["parents"]), writer, digest(data), data=data)
         self.graphs.setdefault(identifier, {})[revision_id] = revision
         return revision

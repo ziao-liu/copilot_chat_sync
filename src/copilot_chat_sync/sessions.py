@@ -11,12 +11,19 @@ import os
 import re
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
+
+import ijson
+import psutil
 
 MAX_SESSION_BYTES = 128 * 1024 * 1024
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_LOG_BYTES = 8 * 1024 * 1024 * 1024
 FILE_CHUNK_BYTES = 1024 * 1024
+JSON_BUFFER_BYTES = 32 * 1024 * 1024
+MAX_PROCESS_BYTES = 2 * 1024 * 1024 * 1024
 SESSION_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 
 
@@ -42,12 +49,81 @@ def canonical_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+class MemoryGuard:
+    def __init__(self) -> None:
+        self.process = psutil.Process()
+        rss = self.process.memory_info().rss
+        self.limit = min(MAX_PROCESS_BYTES, rss + psutil.virtual_memory().available // 2)
+        self.calls = 0
+
+    def check(self, force: bool = False) -> None:
+        self.calls += 1
+        if not force and self.calls % 256:
+            return
+        if self.process.memory_info().rss > self.limit:
+            raise SyncError("Insufficient memory for this conversation; close other applications and retry on a computer with more RAM. No chat was truncated.")
+
+
+def _canonical_parts(value: Any, depth: int = 0) -> Iterator[str]:
+    if depth >= 256 and isinstance(value, (dict, list, tuple)):
+        raise SyncError("JSON nesting exceeds 256 levels")
+    if isinstance(value, str):
+        yield '"'
+        for start in range(0, len(value), 64 * 1024):
+            yield json.dumps(value[start:start + 64 * 1024], ensure_ascii=False)[1:-1]
+        yield '"'
+    elif isinstance(value, dict):
+        yield "{"
+        for index, key in enumerate(sorted(value)):
+            if index:
+                yield ","
+            name = key if isinstance(key, str) else json.dumps(key, allow_nan=False)
+            yield from _canonical_parts(name, depth + 1)
+            yield ":"
+            yield from _canonical_parts(value[key], depth + 1)
+        yield "}"
+    elif isinstance(value, (list, tuple)):
+        yield "["
+        for index, item in enumerate(value):
+            if index:
+                yield ","
+            yield from _canonical_parts(item, depth + 1)
+        yield "]"
+    else:
+        yield json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def canonical_chunks(value: Any, newline: bool = False, check_size: bool = True) -> Iterator[bytes]:
+    guard = MemoryGuard()
+    guard.check(force=True)
+    total = 0
+    for part in _canonical_parts(value):
+        guard.check()
+        for start in range(0, len(part), FILE_CHUNK_BYTES):
+            chunk = part[start:start + FILE_CHUNK_BYTES].encode("utf-8")
+            total += len(chunk)
+            if check_size and total > MAX_SNAPSHOT_BYTES:
+                raise SyncError("JSON snapshot exceeds 2 GiB; no oversized snapshot was written")
+            yield chunk
+    if newline:
+        if check_size and total + 1 > MAX_SNAPSHOT_BYTES:
+            raise SyncError("JSON snapshot exceeds 2 GiB; no oversized snapshot was written")
+        yield b"\n"
+
+
+def chunks_digest(chunks: Iterable[bytes]) -> str:
+    checksum = hashlib.sha256()
+    for chunk in chunks:
+        checksum.update(chunk)
+    return checksum.hexdigest()
+
+
 def digest(value: Any) -> str:
-    return hashlib.sha256(canonical_bytes(value)).hexdigest()
+    return chunks_digest(canonical_chunks(value))
 
 
 def _json_size(value: Any) -> int:
-    return len(canonical_bytes(value))
+    return sum(len(chunk) for chunk in canonical_chunks(value, check_size=False))
 
 
 @contextmanager
@@ -91,6 +167,109 @@ def read_stable(path: Path, limit: int = MAX_SESSION_BYTES) -> bytes:
     return data
 
 
+class JSONReader:
+    def __init__(self, stream: BinaryIO, guard: MemoryGuard, line: bool = False, prefix: bytes = b""):
+        self.stream = stream
+        self.guard = guard
+        self.line = line
+        self.prefix = prefix
+        self.count = 0
+        self.finished = False
+        self.nonempty = False
+
+    def read(self, size: int = -1) -> bytes:
+        if size == 0 or self.finished:
+            return b""
+        self.guard.check(force=True)
+        size = JSON_BUFFER_BYTES if size < 0 else min(size, JSON_BUFFER_BYTES)
+        head, self.prefix = self.prefix[:size], self.prefix[size:]
+        if self.line and head.endswith(b"\n"):
+            data = head
+        elif self.line:
+            data = head + self.stream.readline(size - len(head)) if len(head) < size else head
+        else:
+            data = head + self.stream.read(size - len(head)) if len(head) < size else head
+        self.count += len(data)
+        if self.count > MAX_SNAPSHOT_BYTES:
+            raise SyncError("JSON record exceeds 2 GiB; the source file was not modified")
+        self.finished = not data or (self.line and data.endswith(b"\n"))
+        self.nonempty = self.nonempty or bool(data.strip(b" \t\r\n"))
+        return data
+
+
+_EMPTY = object()
+
+
+def _read_json(reader: JSONReader, allow_empty: bool = False) -> Any:
+    builder = ijson.ObjectBuilder()
+    found = False
+    depth = 0
+    try:
+        # Larger parser buffers avoid quadratic rescanning of giant string tokens.
+        for event, value in ijson.basic_parse(reader, buf_size=JSON_BUFFER_BYTES):
+            found = True
+            if event in ("start_map", "start_array"):
+                depth += 1
+                if depth > 256:
+                    raise SyncError("JSON nesting exceeds 256 levels")
+            elif event in ("end_map", "end_array"):
+                depth -= 1
+            if isinstance(value, Decimal):
+                value = float(value)
+                if not math.isfinite(value):
+                    raise SyncError("Non-finite JSON number")
+            reader.guard.check(force=event == "string" and len(value) > 64 * 1024)
+            builder.event(event, value)
+    except ijson.IncompleteJSONError:
+        if allow_empty and not reader.nonempty:
+            return _EMPTY
+        raise
+    if not found:
+        raise SyncError("Empty JSON document")
+    reader.guard.check(force=True)
+    return builder.value
+
+
+def load_json(path: Path) -> Any:
+    try:
+        with stable_file(path, MAX_SNAPSHOT_BYTES) as stream:
+            prefix = stream.read(3)
+            return _read_json(JSONReader(stream, MemoryGuard(), prefix=b"" if prefix == b"\xef\xbb\xbf" else prefix))
+    except MemoryError as error:
+        raise SyncError(f"Cannot read JSON {path}: Insufficient memory; no chat was truncated") from error
+    except (OSError, ValueError, ijson.JSONError) as error:
+        raise SyncError(f"Cannot read JSON {path}: {error}") from error
+
+
+def _log_entries(stream: BinaryIO) -> Iterator[tuple[int, Any]]:
+    guard = MemoryGuard()
+    number = 0
+    first = True
+    total = 0
+    while True:
+        number += 1
+        prefix = stream.readline(3 if first else 1)
+        if first and prefix.startswith(b"\xef") and len(prefix) < 3:
+            prefix += stream.read(3 - len(prefix))
+        if first and prefix == b"\xef\xbb\xbf":
+            prefix = stream.readline(1)
+        first = False
+        if not prefix:
+            return
+        if prefix.endswith(b"\n") and not prefix.strip():
+            continue
+        reader = JSONReader(stream, guard, line=True, prefix=prefix)
+        try:
+            entry = _read_json(reader, allow_empty=True)
+            total += reader.count
+            if total > MAX_LOG_BYTES:
+                raise SyncError("JSONL log exceeds 8 GiB")
+            if entry is not _EMPTY:
+                yield number, entry
+        except (ValueError, ijson.JSONError, SyncError) as error:
+            raise SyncError(f"Invalid JSONL at line {number}: {error}") from error
+
+
 def _parent(state: Any, keys: Any) -> tuple[Any, str | int]:
     if not isinstance(keys, list) or not keys:
         raise SyncError("Mutation paths must be non-empty arrays")
@@ -113,16 +292,12 @@ def _get(container: Any, key: Any) -> Any:
     raise SyncError("Mutation traverses a missing or invalid path")
 
 
-def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
+def _replay(entries: Iterable[tuple[int, Any]], size_of: Callable[[Any], int]) -> dict[str, Any]:
     state: Any = None
     initialized = False
     state_bytes = 0
-    lines = io.StringIO(text) if isinstance(text, str) else text
-    for line_number, line in enumerate(lines, 1):
-        if not line.strip():
-            continue
+    for line_number, entry in entries:
         try:
-            entry = json_loads(line)
             if not isinstance(entry, dict) or type(entry.get("kind")) is not int:
                 raise SyncError("Invalid mutation entry")
             kind = entry["kind"]
@@ -133,9 +308,9 @@ def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
                 if initialized or not isinstance(entry.get("v"), dict):
                     raise SyncError("Expected exactly one initial object as the first entry")
                 state = entry["v"]
-                state_bytes = _json_size(state)
-                if state_bytes > MAX_SESSION_BYTES:
-                    raise SyncError("Replayed session exceeds 128 MiB; refusing an oversized live snapshot")
+                state_bytes = size_of(state)
+                if state_bytes > MAX_SNAPSHOT_BYTES:
+                    raise SyncError("Replayed session exceeds 2 GiB; refusing an oversized live snapshot")
                 initialized = True
                 continue
             if not initialized:
@@ -143,7 +318,7 @@ def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
             parent, key = _parent(state, entry.get("k"))
             present = not isinstance(parent, dict) or key in parent
             previous = parent[key] if present else None
-            previous_bytes = _json_size(previous) if kind != 2 or not isinstance(previous, list) else 0
+            previous_bytes = size_of(previous) if kind != 2 or not isinstance(previous, list) else 0
             previous_count = len(parent)
             delta = 0
             if kind == 1:
@@ -164,13 +339,13 @@ def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
                     start = entry["i"]
                     if type(start) is not int or not 0 <= start <= len(array):
                         raise SyncError("Invalid array truncation index")
-                    delta -= sum(_json_size(value) for value in array[start:])
+                    delta -= sum(size_of(value) for value in array[start:])
                     delta += max(0, start - 1) - max(0, len(array) - 1)
                     del array[start:]
                 values = entry.get("v", [])
                 if not isinstance(values, list):
                     raise SyncError("Push values must be an array")
-                delta += sum(_json_size(value) for value in values)
+                delta += sum(size_of(value) for value in values)
                 delta += max(0, len(array) + len(values) - 1) - max(0, len(array) - 1)
                 array.extend(values)
                 parent[key] = array
@@ -185,18 +360,32 @@ def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
                 raise SyncError(f"Unsupported mutation kind {kind}; update the tool before syncing")
             remains = not isinstance(parent, dict) or key in parent
             if kind != 2:
-                delta = (_json_size(parent[key]) if remains else 0) - (previous_bytes if present else 0)
+                delta = (size_of(parent[key]) if remains else 0) - (previous_bytes if present else 0)
             if isinstance(parent, dict) and present != remains:
-                overhead = _json_size(key) + 1
+                overhead = size_of(key) + 1
                 delta += overhead + int(previous_count > 0) if remains else -overhead - int(previous_count > 1)
             state_bytes += delta
-            if state_bytes > MAX_SESSION_BYTES:
-                raise SyncError("Replayed session exceeds 128 MiB; refusing an oversized live snapshot")
+            if state_bytes > MAX_SNAPSHOT_BYTES:
+                raise SyncError("Replayed session exceeds 2 GiB; refusing an oversized live snapshot")
         except (ValueError, TypeError, KeyError, SyncError) as error:
             raise SyncError(f"Invalid JSONL at line {line_number}: {error}") from error
     if not initialized:
         raise SyncError("Empty session log")
     return state
+
+
+def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
+    lines = io.StringIO(text) if isinstance(text, str) else text
+
+    def entries() -> Iterator[tuple[int, Any]]:
+        for number, line in enumerate(lines, 1):
+            if line.strip():
+                try:
+                    yield number, json_loads(line)
+                except ValueError as error:
+                    raise SyncError(f"Invalid JSONL at line {number}: {error}") from error
+
+    return _replay(entries(), _json_size)
 
 
 def normalize(data: Any, expected_id: str) -> dict[str, Any]:
@@ -236,30 +425,25 @@ def load_session(path: Path) -> dict[str, Any]:
     try:
         if path.suffix == ".jsonl":
             with stable_file(path, MAX_LOG_BYTES) as stream:
-                def lines() -> Iterator[str]:
-                    total = 0
-                    number = 0
-                    while line := stream.readline(MAX_SESSION_BYTES + 1):
-                        number += 1
-                        total += len(line)
-                        if len(line) > MAX_SESSION_BYTES:
-                            raise SyncError(f"JSONL record at line {number} exceeds 128 MiB; the log cannot be safely replayed")
-                        if total > MAX_LOG_BYTES:
-                            raise SyncError(f"JSONL log exceeds {MAX_LOG_BYTES} bytes")
-                        yield line.decode("utf-8-sig" if number == 1 else "utf-8")
-                data = parse_log(lines())
+                data = _replay(_log_entries(stream), _json_size)
         else:
-            data = json_loads(read_stable(path).decode("utf-8-sig"))
+            data = load_json(path)
         return normalize(data, path.stem)
-    except (OSError, UnicodeError, ValueError, SyncError) as error:
+    except MemoryError as error:
+        raise SyncError(f"Cannot read session {path}: Insufficient memory; no chat was truncated") from error
+    except (OSError, UnicodeError, ValueError, ijson.JSONError, SyncError) as error:
         raise SyncError(f"Cannot read session {path}: {error}") from error
 
 
+def native_document(data: dict[str, Any], suffix: str = ".jsonl") -> dict[str, Any]:
+    document = {"kind": 0, "v": data} if suffix == ".jsonl" else data
+    if _json_size(document) + 1 > MAX_SNAPSHOT_BYTES:
+        raise SyncError("Compacted session exceeds 2 GiB; refusing an unreadable import")
+    return document
+
+
 def native_bytes(data: dict[str, Any], suffix: str = ".jsonl") -> bytes:
-    content = canonical_bytes({"kind": 0, "v": data} if suffix == ".jsonl" else data) + b"\n"
-    if len(content) > MAX_SESSION_BYTES:
-        raise SyncError("Compacted session exceeds 128 MiB; refusing an unreadable import")
-    return content
+    return b"".join(canonical_chunks(native_document(data, suffix), newline=True))
 
 
 def metadata(data: dict[str, Any]) -> dict[str, Any]:
