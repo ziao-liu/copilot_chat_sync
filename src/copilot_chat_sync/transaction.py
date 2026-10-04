@@ -10,15 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .index import backup_database, read_keys, write_keys
-from .safety import atomic_write, is_redirect, plain_path
-from .sessions import SyncError, canonical_bytes, json_loads, read_stable, session_id
+from .safety import atomic_copy, atomic_write, is_redirect, plain_path
+from .sessions import SyncError, canonical_bytes, file_digest, json_loads, read_stable, session_id
 from .workspace import Config, Workspace, workspace_id
 
 BACKUP_ID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{8}\Z")
 
 
 def fingerprint(path: Path) -> str | None:
-    return hashlib.sha256(read_stable(path)).hexdigest() if path.exists() else None
+    return file_digest(path) if path.exists() else None
 
 
 def new_backup_id() -> str:
@@ -97,7 +97,7 @@ def apply_updates(config: Config, updates: list[WorkspaceUpdate]) -> str | None:
             if fingerprint(file.path) != file.before_hash:
                 raise SyncError(f"Session changed after planning: {file.path}")
             if file.before_hash is not None:
-                atomic_write(directory / "files" / relative, read_stable(file.path))
+                atomic_copy(file.path, directory / "files" / relative, file.before_hash)
             journal["files"].append({"path": relative, "before": file.before_hash,
                                      "after": hashlib.sha256(file.data).hexdigest()})
         if update.before != update.after:
@@ -161,7 +161,7 @@ def restore_backup(config: Config, identifier: str, apply: bool = False, restore
                 raise SyncError("Migration backup checksum mismatch")
             if fingerprint(chats / name) not in (None, expected):
                 raise SyncError("Newer chat content prevents migration recovery; original shared data is retained")
-            files.append((chats / name, read_stable(backup)))
+            files.append((chats / name, backup, expected))
         migration_plans.append((chats, retained, files))
     for item in journal["files"]:
         path = _chat_path(config.storage, item["path"])
@@ -189,14 +189,14 @@ def restore_backup(config: Config, identifier: str, apply: bool = False, restore
             if is_redirect(chats):
                 chats.rename(retained)
             chats.mkdir(parents=True, exist_ok=True)
-            for path, content in files:
-                atomic_write(path, content)
+            for path, backup, expected in files:
+                atomic_copy(backup, path, expected)
         for item in journal["files"]:
             path = _chat_path(config.storage, item["path"])
             if item["before"] is None:
                 path.unlink(missing_ok=True)
             else:
-                atomic_write(path, read_stable(directory / "files" / item["path"]))
+                atomic_copy(directory / "files" / item["path"], path, item["before"])
         for item in journal["databases"]:
             path = config.storage / item["workspace"] / "state.vscdb"
             write_keys(path, read_keys(path), item["before"])

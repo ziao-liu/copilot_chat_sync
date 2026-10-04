@@ -2,8 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from copilot_chat_sync.sessions import SyncError, digest, load_session, metadata, native_bytes, normalize, parse_log
+from copilot_chat_sync.sessions import SyncError, _json_size, canonical_bytes, digest, file_chunks, file_digest, load_session, metadata, native_bytes, normalize, parse_log
 
 SID = "11111111-1111-4111-8111-111111111111"
 
@@ -68,6 +69,72 @@ class SessionTests(unittest.TestCase):
                 path.write_bytes(native_bytes(data, suffix))
                 self.assertEqual(load_session(path), data)
         self.assertEqual(metadata(data)["title"], "\u4e2d\u6587 question")
+
+    def test_streaming_log_never_uses_whole_file_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / (SID + ".jsonl")
+            path.write_bytes(b"\xef\xbb\xbf" + native_bytes(sample()) + b'\r\n{"kind":1,"k":["customTitle"],"v":"Final"}')
+            with patch("copilot_chat_sync.sessions.read_stable", side_effect=AssertionError("Whole log read")):
+                self.assertEqual(load_session(path)["customTitle"], "Final")
+            path.write_bytes(path.read_bytes() + b'\n{"kind":1')
+            with self.assertRaisesRegex(SyncError, "line 4"):
+                load_session(path)
+
+    def test_replayed_size_accounts_for_every_mutation(self):
+        entries = [
+            {"kind": 0, "v": sample()},
+            {"kind": 1, "k": ["customTitle"], "v": "\u4e2d" * 100},
+            {"kind": 1, "k": ["customTitle"], "v": "Small"},
+            {"kind": 2, "k": ["requests"], "v": [{"message": "One"}, {"message": "Two"}]},
+            {"kind": 2, "k": ["requests"], "i": 1, "v": [{"message": "New"}]},
+            {"kind": 3, "k": ["customTitle"]},
+            {"kind": 1, "k": ["temporary"], "v": None},
+            {"kind": 2, "k": ["temporary"], "v": [1, 2]},
+            {"kind": 3, "k": ["temporary", 0]},
+            {"kind": 1, "k": ["temporary"], "v": [0]},
+            {"kind": 1, "k": ["temporary"]},
+            {"kind": 2, "k": ["temporary"], "v": [True]},
+            {"kind": 2, "k": ["temporary"], "i": 0},
+        ]
+        sizes = []
+        for length in range(1, len(entries) + 1):
+            lines = [json.dumps(entry, ensure_ascii=False) for entry in entries[:length]]
+            expected = parse_log(iter(lines))
+            sizes.append(_json_size(expected))
+            limit = max(sizes)
+            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", limit):
+                self.assertEqual(parse_log(iter(lines)), expected)
+            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", limit - 1):
+                with self.assertRaisesRegex(SyncError, "Replayed session"):
+                    parse_log(iter(lines))
+
+    def test_log_record_and_total_limits_are_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / (SID + ".jsonl")
+            path.write_bytes(native_bytes(sample()) + canonical_bytes({"kind": 1, "k": ["customTitle"], "v": "x" * 400}) + b"\n")
+            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 300):
+                with self.assertRaisesRegex(SyncError, "record at line 2"):
+                    load_session(path)
+            with patch("copilot_chat_sync.sessions.MAX_LOG_BYTES", path.stat().st_size - 1):
+                with self.assertRaisesRegex(SyncError, "File exceeds"):
+                    load_session(path)
+                with self.assertRaisesRegex(SyncError, "File exceeds"):
+                    file_digest(path)
+            with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 100):
+                with self.assertRaisesRegex(SyncError, "Compacted session"):
+                    native_bytes(normalize(sample(), SID))
+
+    def test_chunk_reader_detects_changed_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.jsonl"
+            path.write_bytes(b"abcdef")
+            with patch("copilot_chat_sync.sessions.FILE_CHUNK_BYTES", 2):
+                chunks = file_chunks(path)
+                self.assertEqual(next(chunks), b"ab")
+                with path.open("ab") as stream:
+                    stream.write(b"g")
+                with self.assertRaisesRegex(SyncError, "File changed while reading"):
+                    list(chunks)
 
     def test_rejects_session_mismatch_and_future_versions(self):
         for change in ({"version": 4}, {"sessionId": "../../escape"}, {"creationDate": float("nan")}):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 import tempfile
@@ -9,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .sessions import SyncError
+from .sessions import SyncError, file_chunks
 
 
 def is_redirect(path: Path) -> bool:
@@ -46,6 +47,25 @@ def atomic_write(path: Path, data: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def atomic_copy(source: Path, destination: Path, expected_hash: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".pending-", dir=destination.parent)
+    try:
+        checksum = hashlib.sha256()
+        with os.fdopen(descriptor, "wb") as stream:
+            for chunk in file_chunks(source):
+                checksum.update(chunk)
+                stream.write(chunk)
+            if checksum.hexdigest() != expected_hash:
+                raise SyncError(f"Source checksum changed while copying: {source}")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

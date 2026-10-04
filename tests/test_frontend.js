@@ -22,7 +22,7 @@ function harness(snapshot, responses = []) {
         close() { this.open = false; }
         set innerHTML(value) {
             this.markup = value;
-            for (const id of ["acknowledge", "plan-expiry", "project-choice"]) elements.delete(id);
+            for (const id of ["acknowledge", "plan-expiry", "project-tree"]) elements.delete(id);
             for (const match of value.matchAll(/id="([^"]+)"/g)) elements.set(match[1], new Element(match[1]));
         }
         get innerHTML() { return this.markup; }
@@ -68,6 +68,8 @@ async function main() {
     assert.strictEqual(h.run("workspaceLabel(snapshot.workspaces[0])"), "nipie · /home/demo/project");
     assert.strictEqual(h.run("workspaceLabel({uri: 'file:///C:/project'})"), "本机 · /C:/project");
     assert.strictEqual(h.run("escapeHtml('<script>\"&')"), "&lt;script&gt;&quot;&amp;");
+    assert(h.run("friendlyError(new Error('JSONL record at line 1 exceeds 128 MiB'))").includes("没有截断或删除"));
+    assert(h.run("friendlyError(new Error('File exceeds 8589934592 bytes'))").includes("8 GiB"));
     assert.strictEqual(h.run("blockedReason(snapshot)"), "");
     h.context.snapshot.workspaces.push({ ...project, id: "two" });
     assert.strictEqual(h.run("currentProject(snapshot)"), null);
@@ -151,8 +153,7 @@ async function main() {
 
     h = harness(base(), [ticket({ store: "/shared/project", bindings: [project], bound: 1 })]);
     h.run("state.setup = {store: '/shared/project', storage: '/native', selected: ''}; projectPicker(snapshot.workspaces, true)");
-    h.elements.get("project-choice").value = "one";
-    h.elements.get("project-choice").listeners.change();
+    h.elements.get("project-tree").listeners.change({ target: { name: "project-choice", value: "one" } });
     h.elements.get("save-project").listeners.click();
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepStrictEqual(h.calls[0].body, { action: "init", store: "/shared/project", storage: "/native", workspaces: ["one"] });
@@ -163,8 +164,7 @@ async function main() {
     h = harness(base(), [ticket({ bound: 1, added: ["other"], removed: ["one"] })]);
     h.run("projectPicker([{id: 'other', uri: 'file:///other'}])");
     assert.strictEqual(h.elements.get("save-project").disabled, true);
-    h.elements.get("project-choice").value = "other";
-    h.elements.get("project-choice").listeners.change();
+    h.elements.get("project-tree").listeners.change({ target: { name: "project-choice", value: "other" } });
     assert.strictEqual(h.elements.get("save-project").disabled, false);
     h.elements.get("save-project").listeners.click();
     await new Promise((resolve) => setImmediate(resolve));
@@ -173,12 +173,42 @@ async function main() {
 
     h = harness(base());
     h.run("projectPicker([{id: 'a', uri: 'file:///same'}, {id: 'b', uri: 'file:///same'}])");
-    assert(h.elements.get("modal-body").innerHTML.includes("本机工作区 1"));
-    assert(h.elements.get("modal-body").innerHTML.includes("本机工作区 2"));
+    assert(h.elements.get("modal-body").innerHTML.includes("工作区 1"));
+    assert(h.elements.get("modal-body").innerHTML.includes("工作区 2"));
     h.run("projectPicker([{id: 'a', uri: 'file:///%3Cscript%3E'}])");
     assert(h.elements.get("modal-body").innerHTML.includes("&lt;script&gt;"));
     assert(!h.elements.get("modal-body").innerHTML.includes("<script>"));
 
+    const treeRows = [
+        { id: "a", uri: "vscode-remote://ssh-remote%2Bnipie/home/demo/project" },
+        { id: "b", uri: "vscode-remote://ssh-remote%2Bnipie/home/demo/project/child" },
+        { id: "c", uri: "vscode-remote://ssh-remote%2Bnipie-proxy/home/demo/project" },
+        { id: "d", uri: "vscode-remote://ssh-remote%2Bnipie/home/demo/Project" },
+        { id: "e", uri: "file:///C:/project" },
+        { id: "f", uri: "vscode-remote://ssh-remote%2Bnipie/home/demo/a%2Fb" },
+        { id: "g", uri: "file:///" },
+    ];
+    h.context.treeRows = treeRows;
+    const plain = (value) => JSON.parse(JSON.stringify(value));
+    const tree = plain(h.run("projectTree(treeRows)"));
+    assert.strictEqual(tree.length, 3);
+    assert.deepStrictEqual(tree, plain(h.run("projectTree([...treeRows].reverse())")));
+    assert.deepStrictEqual(tree.flatMap((root) => root.ids).sort(), treeRows.map((row) => row.id).sort());
+    assert.strictEqual(tree.find((root) => root.label === "nipie").children[0].label, "home");
+    const folders = tree.find((root) => root.label === "nipie").children[0].children[0].children;
+    assert(folders.some((folder) => folder.label === "Project"));
+    assert.strictEqual(folders.find((folder) => folder.label === "project").children[0].workspaces[0].id, "b");
+    assert(folders.some((folder) => folder.label === "a/b" && !folder.children.length));
+    const markup = h.run("projectTreeMarkup(treeRows, 'b')");
+    assert(markup.includes('value="b" checked'));
+    assert.strictEqual((markup.match(/type="radio"/g) || []).length, treeRows.length);
+    assert(markup.includes("<summary>nipie"));
+    assert(markup.includes("<details open><summary>child"));
+    assert(markup.includes("<summary>C:"));
+    assert.strictEqual(h.run("projectTree([{id:'bad',uri:'not a URI'}])[0].label"), "其他工作区");
+    h.run("projectPicker(snapshot.workspaces)");
+    h.elements.get("project-tree").listeners.change({ target: { name: "project-choice", value: "not-a-workspace" } });
+    assert.strictEqual(h.elements.get("save-project").disabled, false);
     assert(!html.includes("<nav"));
     assert(html.includes('id="send"') && html.includes('id="receive"'));
     assert(html.indexOf('id="send"') < html.indexOf('id="old-links"'));

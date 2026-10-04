@@ -25,6 +25,52 @@ function workspaceLabel(workspace) {
     } catch { return workspace.uri; }
 }
 
+function projectTree(workspaces) {
+    const roots = new Map();
+    const node = (label) => ({ label, children: new Map(), workspaces: [] });
+    for (const workspace of workspaces) {
+        let connection, host, segments;
+        try {
+            const uri = new URL(workspace.uri);
+            const authority = decodeURIComponent(uri.host);
+            connection = JSON.stringify([uri.protocol, authority]);
+            host = authority.replace(/^ssh-remote\+/, "") || "本机";
+            segments = uri.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        } catch {
+            connection = "unknown";
+            host = "其他工作区";
+            segments = [workspace.uri];
+        }
+        if (!roots.has(connection)) roots.set(connection, node(host));
+        let parent = roots.get(connection);
+        for (const segment of segments) {
+            if (!parent.children.has(segment)) parent.children.set(segment, node(segment));
+            parent = parent.children.get(segment);
+        }
+        parent.workspaces.push(workspace);
+    }
+    const compare = (a, b) => a.label.localeCompare(b.label, "zh-CN", { numeric: true, sensitivity: "variant" });
+    function finish(branch) {
+        const children = [...branch.children.values()].sort(compare).map(finish);
+        const entries = [...branch.workspaces].sort((a, b) => a.id.localeCompare(b.id));
+        return { label: branch.label, children, workspaces: entries,
+            ids: [...entries.map((workspace) => workspace.id), ...children.flatMap((child) => child.ids)] };
+    }
+    return [...roots.values()].sort(compare).map(finish);
+}
+
+function projectTreeMarkup(workspaces, current) {
+    function branch(item, root = false) {
+        const entries = item.workspaces.map((workspace, index) => `<label class="project-option">
+            <input type="radio" name="project-choice" value="${escapeHtml(workspace.id)}" ${workspace.id === current ? "checked" : ""}>
+            <span>${item.workspaces.length > 1 ? `工作区 ${index + 1}` : "选择此项目"}<small>${escapeHtml(workspaceLabel(workspace))}${workspace.scan_error ? " · 读取异常" : ""}</small></span></label>`).join("");
+        return `<li><details ${root || item.ids.includes(current) ? "open" : ""}><summary>${escapeHtml(item.label)}${root ? `（${item.ids.length}）` : ""}</summary>
+            ${entries}${item.children.length ? `<ul>${item.children.map((child) => branch(child)).join("")}</ul>` : ""}</details></li>`;
+    }
+    const tree = projectTree(workspaces);
+    return tree.length ? `<ul class="project-tree">${tree.map((item) => branch(item, true)).join("")}</ul>` : "<p>未发现项目，请先在桌面 VS Code 中打开项目。</p>";
+}
+
 function currentProject(snapshot) {
     const bound = snapshot.workspaces.filter((workspace) => workspace.bound);
     return bound.length === 1 ? bound[0] : null;
@@ -65,6 +111,10 @@ function dateLabel(value) {
 
 function friendlyError(error) {
     const message = error.message || String(error);
+    if (/JSONL record at line|Replayed session exceeds|Compacted session exceeds|Shared revision exceeds/.test(message)) {
+        return "日志可以很大，但单条操作或重放后的聊天内容超过 128 MiB 时仍无法安全同步。记录没有截断或删除，请查看技术信息。";
+    }
+    if (/File exceeds 8589934592|JSONL log exceeds/.test(message)) return "聊天日志超过 8 GiB 安全上限，暂不支持同步。原文件未删除或截断。";
     if (message.includes("Unpublished local changes")) return "本机有未发送的修改。请先发送，再接收。";
     if (message.includes("Editing snapshots")) return "发现旧编辑检查点，接收或修复已暂停。请先备份代码，再查看隔离方案。";
     if (/Close all VS Code|VS Code is running/.test(message)) return "请关闭本机所有 VS Code 窗口，再刷新重试。";
@@ -202,14 +252,10 @@ function projectPicker(workspaces, setup = false, issues = []) {
     const rows = workspaces.filter((workspace) => !workspace.missing);
     const wanted = setup ? state.setup.selected : currentProject(state.snapshot)?.id;
     const current = rows.some((workspace) => workspace.id === wanted) ? wanted : "";
+    let selected = current;
     const body = `<p>一次只绑定一个项目。另一台电脑应选择同一远程目录对应的工作区。</p>
         <p class="notice warning">一个共享文件夹就是一个聊天池。更换为无关项目时，请使用独立配置和独立共享文件夹，不能直接复用此池。</p>
-        <label for="project-choice">项目</label><select id="project-choice">
-        <option value="">请选择项目</option>${rows.map((workspace, index) => {
-            const label = workspaceLabel(workspace);
-            const duplicate = rows.some((other) => other.id !== workspace.id && workspaceLabel(other) === label);
-            return `<option value="${escapeHtml(workspace.id)}" ${workspace.id === current ? "selected" : ""}>${escapeHtml(label)}${duplicate ? ` · 本机工作区 ${index + 1}` : ""}</option>`;
-        }).join("")}</select>
+        <fieldset id="project-tree"><legend>展开服务器和目录，选择项目</legend>${projectTreeMarkup(rows, current)}</fieldset>
         <p class="hint">未找到？先在桌面 VS Code 中打开一次项目，再重新扫描。SSH 别名不同的工作区不会自动合并。</p>
         ${issues.map((issue) => `<p class="notice warning">${escapeHtml(issue)}</p>`).join("")}`;
     dialog(setup ? "选择要同步的项目" : "更换对应工作区", body, [
@@ -217,15 +263,16 @@ function projectPicker(workspaces, setup = false, issues = []) {
         { label: "重新扫描", run: setup ? scanSetup : () => task(async () => { await loadState(); projectPicker(state.snapshot.workspaces); }) },
         { label: setup ? "完成设置" : "保存选择", primary: true, id: "save-project", disabled: !current,
             run: () => {
-                const selected = byId("project-choice").value;
                 if (!selected) return;
                 if (setup) state.setup.selected = selected;
                 preview(setup ? { action: "init", store: state.setup.store, storage: state.setup.storage, workspaces: [selected] } :
                     { action: "bindings", workspaces: [selected] });
             } },
     ]);
-    byId("project-choice").addEventListener("change", () => {
-        const blocked = !byId("project-choice").value;
+    byId("project-tree").addEventListener("change", (event) => {
+        if (event.target.name !== "project-choice" || !rows.some((workspace) => workspace.id === event.target.value)) return;
+        selected = event.target.value;
+        const blocked = !selected;
         byId("save-project").dataset.blocked = String(blocked);
         byId("save-project").disabled = blocked || state.busy;
     });
@@ -274,7 +321,7 @@ function planBody(plan, options) {
 
 function preview(options) {
     return task(async () => {
-        dialog("正在检查", "<p>检查记录、冲突和备份条件，不会跳过安全校验。</p>", []);
+        dialog("正在检查", "<p>检查记录、冲突和备份条件，不会跳过安全校验。大日志可能需要几分钟，请勿启动 VS Code。</p>", []);
         let plan;
         try { plan = await api("/api/preview", options); }
         catch (error) {

@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .index import merge_keys, read_keys
-from .safety import atomic_write, is_redirect, local_lock, plain_path, require_closed
-from .sessions import SyncError, canonical_bytes, digest, json_loads, load_session, native_bytes, read_stable
+from .safety import atomic_copy, atomic_write, is_redirect, local_lock, plain_path, require_closed
+from .sessions import SyncError, canonical_bytes, digest, file_digest, json_loads, load_session, native_bytes, read_stable
 from .store import REVISION_ID, Store
 from .transaction import FileUpdate, WorkspaceUpdate, apply_updates, fingerprint, new_backup_id, require_recovered, restore_backup
 from .workspace import Config, Workspace, workspace_id
@@ -176,7 +176,7 @@ def migrate(config: Config, apply: bool = False, selected: list[str] | None = No
         prepared = []
         for workspace in workspaces:
             paths = workspace.session_files(allow_redirect=True)
-            files = {path.name: read_stable(path) for path in paths.values()}
+            files = {path.name: file_digest(path) for path in paths.values()}
             for path in paths.values():
                 load_session(path)
             if not files:
@@ -193,12 +193,12 @@ def migrate(config: Config, apply: bool = False, selected: list[str] | None = No
             if retained.exists() or is_redirect(retained) or staging.exists():
                 raise SyncError("Migration staging/backup path already exists")
             target = str(workspace.chats.resolve())
-            hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
-            journal["migrations"].append({"workspace": workspace.identifier, "target": target, "files": hashes})
+            journal["migrations"].append({"workspace": workspace.identifier, "target": target, "files": files})
             if apply:
-                for name, data in files.items():
-                    atomic_write(directory / "migration-files" / workspace.identifier / "chatSessions" / name, data)
-                    atomic_write(staging / name, data)
+                for name, expected in files.items():
+                    source = workspace.chats / name
+                    atomic_copy(source, directory / "migration-files" / workspace.identifier / "chatSessions" / name, expected)
+                    atomic_copy(source, staging / name, expected)
             results.append({"workspace": workspace.identifier, "files": len(files), "retained_link": str(retained) if apply else None})
         if apply and prepared:
             atomic_write(directory / "journal.json", canonical_bytes(journal) + b"\n")

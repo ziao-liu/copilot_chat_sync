@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from copilot_chat_sync.sessions import SyncError, normalize
 from copilot_chat_sync.store import Store
@@ -70,6 +71,13 @@ class StoreTests(unittest.TestCase):
         second = self.publish("same")
         self.assertEqual(first.revision, second.revision)
         self.assertEqual(len(list((self.root / "revisions" / SID).iterdir())), 1)
+
+    def test_oversized_revision_is_not_written_even_in_preview(self):
+        for preview in (True, False):
+            with patch("copilot_chat_sync.store.MAX_SESSION_BYTES", 10):
+                with self.assertRaisesRegex(SyncError, "Shared revision exceeds"):
+                    self.store.publish(normalize(sample(), SID), [], WRITER, dry_run=preview)
+            self.assertFalse((self.root / "revisions").exists())
 
     def test_old_payloads_are_lazy_and_rechecked_on_use(self):
         revision = self.publish("large historical payload")

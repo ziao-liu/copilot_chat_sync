@@ -8,15 +8,15 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-Version 0.1.3 has a compact Chinese-language, single-page interface with transfer
-buttons kept above optional warnings.
+Version 0.1.4 has a compact Chinese-language, single-page interface, expandable
+project folders and streaming support for large native JSONL logs.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.3)
-  and download `CopilotChatSync-0.1.3-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.4)
+  and download `CopilotChatSync-0.1.4-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -47,7 +47,9 @@ For later launches, only the last command is needed.
 
 1. Check the prefilled shared folder. The local VS Code data location is detected
    automatically; expand the data-location section only if detection is wrong.
-2. Click **选择项目** and select one project. Missing project? Open it once in desktop
+2. Click **选择项目**, expand the server/folder hierarchy and select one project.
+   Servers and sibling directories are listed alongside each other; only the selected
+   project is bound, not every child of a folder. Missing project? Open it once in desktop
    VS Code using the intended SSH alias, then click **重新扫描**.
 3. Close VS Code, click **完成设置**, review the project/shared folder and confirm.
 
@@ -88,6 +90,19 @@ paths are shortened on the main page; hover or open Settings to see the full pat
 - Keep the shared folder private. Chats/backups are not encrypted by this tool;
   do not share the panel's private URL.
 
+## Large Chat Logs
+
+Native `.jsonl` logs are replayed line by line (up to 8 GiB), so a 512 MiB-2 GiB
+append-only log no longer hits the old 128 MiB whole-file reader limit.
+Sending does not rewrite or truncate the source log; it publishes the resulting
+conversation snapshot. Raw backups, restoration and old-link migration use
+checksummed chunk copies, retaining the complete original log.
+
+Individual JSONL records, the replayed live state and compact/shared snapshots
+still have a 128 MiB safety limit. These are different from total log size:
+a huge single record or a genuinely huge conversation still fails explicitly.
+Large-log replay may take several minutes. Keep VS Code closed throughout.
+
 ## More
 
 From the portable folder, preview without touching your chats:
@@ -96,8 +111,11 @@ From the portable folder, preview without touching your chats:
 .\CopilotChatSync.exe --demo
 ```
 
-To update, close the app and install/extract the new release. Uninstalling keeps
-your chats, shared store and local configuration/backups.
+To update the installer version, close the app and install the new Setup into the
+same directory; it replaces program files and retains chats, the shared store,
+local configuration and backups. There is no need to uninstall first.
+For a portable update, prefer extracting into a new folder to avoid leftover old
+runtime files. Uninstalling keeps your chats, shared store and local configuration/backups.
 
 [Migration, recovery, CLI and limitations](docs/advanced.md).
 The demo uses synthetic data and is read-only. [MIT license](LICENSE).

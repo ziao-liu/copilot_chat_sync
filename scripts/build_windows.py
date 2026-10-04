@@ -42,22 +42,47 @@ def verify_installer(installer: Path, version: str, screenshot: Path) -> None:
         raise RuntimeError("Installer smoke requires an account without existing Copilot Chat Sync user data")
     data_directory.mkdir()
     marker = data_directory / "release-smoke.txt"
+    config_marker = data_directory / "config.json"
+    backup_marker = data_directory / "config.backups" / "upgrade-smoke.txt"
+    expected_data = {marker: b"User data must survive upgrade and uninstall",
+                     config_marker: b'{"upgrade-smoke":true}',
+                     backup_marker: b"Backup must survive upgrade and uninstall"}
+
+    def verify_user_data() -> None:
+        if any(path.read_bytes() != content for path, content in expected_data.items()):
+            raise RuntimeError("Installer upgrade or uninstall changed user configuration/backups")
+
     try:
-        marker.write_text("User data must survive uninstall", encoding="utf-8")
+        for path, content in expected_data.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
         with tempfile.TemporaryDirectory(prefix="chat-sync-install-") as temporary:
             target = Path(temporary) / "installed app"
             try:
                 installer_process(installer, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", f"/DIR={target}"])
+                verify_user_data()
+                executable = target / "CopilotChatSync-CLI.exe"
+                expected_binary = hashlib.sha256(executable.read_bytes()).hexdigest()
                 smoke([str(target / "CopilotChatSync-CLI.exe")], version)
+                executable.write_bytes(b"Stale program must be replaced during same-directory upgrade")
+                installer_process(installer, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", f"/DIR={target}"])
+                verify_user_data()
+                if hashlib.sha256(executable.read_bytes()).hexdigest() != expected_binary:
+                    raise RuntimeError("Same-directory installation did not replace the stale program")
+                smoke([str(executable)], version)
                 smoke_desktop(target / "CopilotChatSync.exe", version, screenshot)
             finally:
                 uninstaller = target / "unins000.exe"
                 if uninstaller.exists():
                     installer_process(uninstaller, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
-            if (target / "CopilotChatSync.exe").exists() or marker.read_text(encoding="utf-8") != "User data must survive uninstall":
-                raise RuntimeError("Installer removal or user-data preservation check failed")
+            verify_user_data()
+            if (target / "CopilotChatSync.exe").exists():
+                raise RuntimeError("Installer removal check failed")
     finally:
-        marker.unlink(missing_ok=True)
+        for path in expected_data:
+            path.unlink(missing_ok=True)
+        if backup_marker.parent.exists():
+            backup_marker.parent.rmdir()
         if data_directory.exists():
             data_directory.rmdir()
 

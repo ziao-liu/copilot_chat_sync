@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from copilot_chat_sync.safety import code_processes, is_redirect, local_lock, plain_path
+from copilot_chat_sync.safety import atomic_copy, code_processes, is_redirect, local_lock, plain_path
 from copilot_chat_sync import __version__
-from copilot_chat_sync.sessions import SyncError, native_bytes, normalize
+from copilot_chat_sync.sessions import SyncError, file_digest, native_bytes, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.sync import migrate
 from copilot_chat_sync.workspace import Config
@@ -18,6 +18,19 @@ from test_workspace import URI, WID, make_workspace
 
 
 class SafetyTests(unittest.TestCase):
+    def test_streaming_copy_checks_hash_before_replacing_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / "source", root / "target"
+            source.write_bytes(b"new data")
+            target.write_bytes(b"original")
+            with self.assertRaisesRegex(SyncError, "checksum changed"):
+                atomic_copy(source, target, "0" * 64)
+            self.assertEqual(target.read_bytes(), b"original")
+            self.assertFalse(list(root.glob(".pending-*")))
+            atomic_copy(source, target, file_digest(source))
+            self.assertEqual(target.read_bytes(), b"new data")
+
     def test_parent_traversal_is_rejected(self):
         root = Path(tempfile.gettempdir()) / "native"
         with self.assertRaisesRegex(SyncError, "Parent traversal"):

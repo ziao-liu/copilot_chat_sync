@@ -66,6 +66,14 @@ dialog::backdrop { background: #14203380; }
 .revision { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .revision label { font-weight: normal; }
 .revision small { display: block; color: #637187; }
+.project-tree, .project-tree ul { list-style: none; padding-left: 18px; margin: 4px 0; }
+.project-tree { padding-left: 0; }
+.project-tree details { margin: 6px 0; }
+.project-tree summary { font-weight: 600; padding: 4px 0; }
+fieldset { min-width: 0; border: 1px solid #dfe5ee; border-radius: 8px; padding: 12px; }
+.project-option { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 8px 18px; font-weight: normal; }
+.project-option input { margin-top: 6px; flex-shrink: 0; }
+.project-option small { display: block; font-size: 12px; color: #58677c; overflow-wrap: anywhere; }
 .transcript { white-space: pre-wrap; overflow-wrap: anywhere; }
 .skip-link { position: absolute; top: -60px; left: 16px; background: white; padding: 8px; }
 .skip-link:focus { top: 8px; }

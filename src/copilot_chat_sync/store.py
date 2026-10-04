@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .safety import atomic_write, is_regular, plain_path
-from .sessions import SyncError, canonical_bytes, digest, json_loads, normalize, read_stable, session_id
+from .sessions import MAX_SESSION_BYTES, SyncError, canonical_bytes, digest, json_loads, normalize, read_stable, session_id
 
 REVISION_ID = re.compile(r"[0-9a-f]{64}\Z")
 MARKER = {"format": "copilot-chat-sync", "version": 1}
@@ -124,6 +124,8 @@ class Store:
         revision_id = digest(envelope)
         path = plain_path(self.root / "revisions" / identifier / (revision_id + ".json"), self.root)
         content = canonical_bytes(envelope) + b"\n"
+        if len(content) > MAX_SESSION_BYTES:
+            raise SyncError("Shared revision exceeds 128 MiB after replay; no oversized revision was written")
         if path.exists():
             if read_stable(path) != content:
                 raise SyncError(f"Refusing to replace a non-identical immutable revision: {path}")

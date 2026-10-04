@@ -28,10 +28,13 @@ jobs:
         run: python -m pip install .
       - name: Test native fixtures and safety boundaries
         run: python -m unittest discover -s tests -v
+      - name: Verify a real log above 512 MiB and bounded memory
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: python tests/check_large_log.py
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Test simplified handoff and safety gates
+      - name: Test hierarchical project selection and handoff safety
         run: node tests/test_frontend.js
       - name: Verify module and installed CLI
         run: |

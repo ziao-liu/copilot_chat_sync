@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import math
+import os
 import re
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 MAX_SESSION_BYTES = 128 * 1024 * 1024
+MAX_LOG_BYTES = 8 * 1024 * 1024 * 1024
+FILE_CHUNK_BYTES = 1024 * 1024
 SESSION_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 
 
@@ -40,17 +46,48 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def read_stable(path: Path, limit: int = MAX_SESSION_BYTES) -> bytes:
+def _json_size(value: Any) -> int:
+    return len(canonical_bytes(value))
+
+
+@contextmanager
+def stable_file(path: Path, limit: int) -> Iterator[BinaryIO]:
     before = path.stat()
     if before.st_size > limit:
         raise SyncError(f"File exceeds {limit} bytes: {path}")
+    def signature(info: os.stat_result) -> tuple[int, int, int, int]:
+        return info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev
+
     with path.open("rb") as stream:
+        if signature(os.fstat(stream.fileno())) != signature(before):
+            raise SyncError(f"File changed while opening: {path}")
+        yield stream
+        if signature(os.fstat(stream.fileno())) != signature(before) or signature(path.stat()) != signature(before):
+            raise SyncError(f"File changed while reading; close VS Code and wait for OneDrive: {path}")
+
+
+def file_chunks(path: Path) -> Iterator[bytes]:
+    with stable_file(path, MAX_LOG_BYTES) as stream:
+        total = 0
+        while chunk := stream.read(FILE_CHUNK_BYTES):
+            total += len(chunk)
+            if total > MAX_LOG_BYTES:
+                raise SyncError(f"File exceeds {MAX_LOG_BYTES} bytes: {path}")
+            yield chunk
+
+
+def file_digest(path: Path) -> str:
+    checksum = hashlib.sha256()
+    for chunk in file_chunks(path):
+        checksum.update(chunk)
+    return checksum.hexdigest()
+
+
+def read_stable(path: Path, limit: int = MAX_SESSION_BYTES) -> bytes:
+    with stable_file(path, limit) as stream:
         data = stream.read(limit + 1)
-    after = path.stat()
     if len(data) > limit:
         raise SyncError(f"File exceeds {limit} bytes: {path}")
-    if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
-        raise SyncError(f"File changed while reading; close VS Code and wait for OneDrive: {path}")
     return data
 
 
@@ -76,10 +113,12 @@ def _get(container: Any, key: Any) -> Any:
     raise SyncError("Mutation traverses a missing or invalid path")
 
 
-def parse_log(text: str) -> dict[str, Any]:
+def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
     state: Any = None
     initialized = False
-    for line_number, line in enumerate(text.splitlines(), 1):
+    state_bytes = 0
+    lines = io.StringIO(text) if isinstance(text, str) else text
+    for line_number, line in enumerate(lines, 1):
         if not line.strip():
             continue
         try:
@@ -94,11 +133,19 @@ def parse_log(text: str) -> dict[str, Any]:
                 if initialized or not isinstance(entry.get("v"), dict):
                     raise SyncError("Expected exactly one initial object as the first entry")
                 state = entry["v"]
+                state_bytes = _json_size(state)
+                if state_bytes > MAX_SESSION_BYTES:
+                    raise SyncError("Replayed session exceeds 128 MiB; refusing an oversized live snapshot")
                 initialized = True
                 continue
             if not initialized:
                 raise SyncError("Log is missing its initial snapshot")
             parent, key = _parent(state, entry.get("k"))
+            present = not isinstance(parent, dict) or key in parent
+            previous = parent[key] if present else None
+            previous_bytes = _json_size(previous) if kind != 2 or not isinstance(previous, list) else 0
+            previous_count = len(parent)
+            delta = 0
             if kind == 1:
                 if "v" not in entry:
                     if isinstance(parent, dict):
@@ -117,12 +164,18 @@ def parse_log(text: str) -> dict[str, Any]:
                     start = entry["i"]
                     if type(start) is not int or not 0 <= start <= len(array):
                         raise SyncError("Invalid array truncation index")
+                    delta -= sum(_json_size(value) for value in array[start:])
+                    delta += max(0, start - 1) - max(0, len(array) - 1)
                     del array[start:]
                 values = entry.get("v", [])
                 if not isinstance(values, list):
                     raise SyncError("Push values must be an array")
+                delta += sum(_json_size(value) for value in values)
+                delta += max(0, len(array) + len(values) - 1) - max(0, len(array) - 1)
                 array.extend(values)
                 parent[key] = array
+                if not isinstance(previous, list):
+                    delta += 2 - (previous_bytes if present else 0)
             elif kind == 3:
                 if isinstance(parent, dict):
                     parent.pop(key, None)
@@ -130,6 +183,15 @@ def parse_log(text: str) -> dict[str, Any]:
                     parent[key] = None
             else:
                 raise SyncError(f"Unsupported mutation kind {kind}; update the tool before syncing")
+            remains = not isinstance(parent, dict) or key in parent
+            if kind != 2:
+                delta = (_json_size(parent[key]) if remains else 0) - (previous_bytes if present else 0)
+            if isinstance(parent, dict) and present != remains:
+                overhead = _json_size(key) + 1
+                delta += overhead + int(previous_count > 0) if remains else -overhead - int(previous_count > 1)
+            state_bytes += delta
+            if state_bytes > MAX_SESSION_BYTES:
+                raise SyncError("Replayed session exceeds 128 MiB; refusing an oversized live snapshot")
         except (ValueError, TypeError, KeyError, SyncError) as error:
             raise SyncError(f"Invalid JSONL at line {line_number}: {error}") from error
     if not initialized:
@@ -172,15 +234,32 @@ def normalize(data: Any, expected_id: str) -> dict[str, Any]:
 
 def load_session(path: Path) -> dict[str, Any]:
     try:
-        text = read_stable(path).decode("utf-8-sig")
-        data = parse_log(text) if path.suffix == ".jsonl" else json_loads(text)
+        if path.suffix == ".jsonl":
+            with stable_file(path, MAX_LOG_BYTES) as stream:
+                def lines() -> Iterator[str]:
+                    total = 0
+                    number = 0
+                    while line := stream.readline(MAX_SESSION_BYTES + 1):
+                        number += 1
+                        total += len(line)
+                        if len(line) > MAX_SESSION_BYTES:
+                            raise SyncError(f"JSONL record at line {number} exceeds 128 MiB; the log cannot be safely replayed")
+                        if total > MAX_LOG_BYTES:
+                            raise SyncError(f"JSONL log exceeds {MAX_LOG_BYTES} bytes")
+                        yield line.decode("utf-8-sig" if number == 1 else "utf-8")
+                data = parse_log(lines())
+        else:
+            data = json_loads(read_stable(path).decode("utf-8-sig"))
         return normalize(data, path.stem)
     except (OSError, UnicodeError, ValueError, SyncError) as error:
         raise SyncError(f"Cannot read session {path}: {error}") from error
 
 
 def native_bytes(data: dict[str, Any], suffix: str = ".jsonl") -> bytes:
-    return canonical_bytes({"kind": 0, "v": data} if suffix == ".jsonl" else data) + b"\n"
+    content = canonical_bytes({"kind": 0, "v": data} if suffix == ".jsonl" else data) + b"\n"
+    if len(content) > MAX_SESSION_BYTES:
+        raise SyncError("Compacted session exceeds 128 MiB; refusing an unreadable import")
+    return content
 
 
 def metadata(data: dict[str, Any]) -> dict[str, Any]:

@@ -1,5 +1,26 @@
 # Release Reviews
 
+## v0.1.4 Large JSONL Logs and Project Hierarchy
+
+The previous 128 MiB whole-file read rejected otherwise replayable large native
+JSONL logs. Parsing now consumes individual records with byte accounting for
+mutations and an 8 GiB raw-log ceiling. Shared envelopes and compact imports
+are checked against the retained 128 MiB limit before publication. Streaming
+hashes/copies replace whole-file buffering in backup, recovery and migration;
+source metadata and full checksums are verified before destination replacement.
+
+Local real-size checks used 537,947,484-byte and 2,147,594,534-byte synthetic logs.
+Both completed Send/Receive, original-log backup/restore and POSIX migration;
+sampled peak RSS was 33.7 MiB, below the 256 MiB regression threshold.
+This validates large accumulated logs, not arbitrary multi-gigabyte individual
+JSON records or live conversation snapshots.
+
+The picker now uses expandable connection/folder nodes with single-workspace
+radio entries, retaining case-sensitive paths, encoded path segments, duplicate
+IDs and separate SSH aliases. Installer verification now covers same-directory
+reinstallation, stale-binary replacement and config/backup preservation.
+Publication remains gated on full CI and native Windows checks.
+
 ## v0.1.3 First-Screen Layout
 
 The v0.1.2 Windows release workflow succeeded, including native rendering and

@@ -213,6 +213,9 @@ and conflicts appear only when relevant. The UI selects one workspace per config
 the CLI still supports explicit multi-workspace groups. Existing configurations are
 never automatically reduced or split. Selecting another workspace does not isolate
 its shared pool, and SSH aliases are never automatically merged.
+The project picker groups workspaces by connection and actual path segments. Expand
+folders to select one leaf workspace; selecting a parent does not bind all descendants.
+Duplicate paths retain distinct workspace IDs and separate radio entries.
 
 ## Command Reference
 
@@ -242,7 +245,12 @@ errors go to stderr. Exit codes: `0` success/preview, `2` validation/safety/I/O 
   when both formats exist.
 - Shared format is version 1, using immutable, checksummed full snapshots. No garbage
   collector exists. Historical payloads load lazily but verification reads all revisions.
-  Oversized/truncated files fail explicitly; the per-file limit is 128 MiB.
+  Oversized/truncated files fail explicitly. Native JSONL logs are replayed
+  incrementally, with an 8 GiB total-log limit and a 128 MiB per-record/live-state
+  limit. Plain native JSON, compact imports and shared revision files remain
+  limited to 128 MiB. Sending leaves the original native log unchanged.
+  Raw backup, restore, hashing and migration stream 1 MiB chunks, with full
+  checksums and changed-source detection before replacement.
 - Deletions do not propagate. A later receive can restore a locally deleted chat.
 - No project code, live terminals, active requests, worktrees, external asset folders
   or checkpoints are migrated. Old links may refer to the original host or unavailable
@@ -265,7 +273,14 @@ Microsoft/GitHub product or a real-time sync service.
 Open this repository as its own VS Code folder for its `src` paths and unittest settings.
 Node is only needed for frontend tests; it is not a runtime dependency.
 
-```bash
+python tests/check_large_log.py
+```
+
+The large-log check writes a real synthetic log above 513 MiB, verifies Send/Receive,
+raw backup/restore and POSIX migration, and samples process RSS below 256 MiB.
+Use `--mib 2048` to verify a log above 2 GiB. Temporary files are cleaned automatically.
+CI runs the 513 MiB check on Linux/Python 3.12. Windows packaging also reinstalls
+into the same directory, verifies stale program replacement and preserves config/backups.bash
 python -m pip install .
 python -m unittest discover -s tests -v
 node tests/test_frontend.js

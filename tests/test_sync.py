@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from copilot_chat_sync.index import INDEX, read_keys
-from copilot_chat_sync.sessions import SyncError, load_session, native_bytes, normalize
+from copilot_chat_sync.sessions import SyncError, canonical_bytes, file_digest, load_session, native_bytes, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.sync import migrate, pull, push, repair, resolve, restore
 from copilot_chat_sync.workspace import Config
@@ -152,6 +152,36 @@ class SyncTests(unittest.TestCase):
             pull(self.configs[1], apply=True)
         self.assertEqual(read_keys(self.workspaces[1].database), before)
         self.assertFalse((self.workspaces[1].chats / (SID + ".jsonl")).exists())
+
+    def test_rollback_preserves_raw_log_larger_than_snapshot_limit(self):
+        self.seed_both()
+        source = self.workspaces[0].chats / (SID + ".jsonl")
+        with source.open("ab") as stream:
+            mutation = canonical_bytes({"kind": 1, "k": ["customTitle"], "v": "x" * 300}) + b"\n"
+            for _ in range(100):
+                stream.write(mutation)
+            stream.write(canonical_bytes({"kind": 3, "k": ["customTitle"]}) + b"\n")
+        original = file_digest(source)
+        before = read_keys(self.workspaces[0].database)
+        self.write(1, "continued B")
+        push(self.configs[1], apply=True)
+        from copilot_chat_sync.index import write_keys
+        calls = []
+
+        def fail_once(*args):
+            calls.append(True)
+            if len(calls) == 1:
+                raise OSError("simulated index failure")
+            return write_keys(*args)
+
+        self.assertGreater(source.stat().st_size, 1024)
+        with patch("copilot_chat_sync.sessions.MAX_SESSION_BYTES", 1024):
+            with patch("copilot_chat_sync.transaction.write_keys", side_effect=fail_once):
+                with self.assertRaisesRegex(SyncError, "rolled back"):
+                    pull(self.configs[0], apply=True)
+            self.assertEqual(file_digest(source), original)
+            self.assertEqual(read_keys(self.workspaces[0].database), before)
+            self.assertEqual(self.text(0), "original")
 
     def test_running_vscode_blocks_apply(self):
         self.closed.side_effect = SyncError("Close all VS Code windows")

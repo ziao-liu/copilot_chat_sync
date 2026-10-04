@@ -6,9 +6,10 @@ import runpy
 import sqlite3
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from copilot_chat_sync.cli import main
 from copilot_chat_sync import __version__
@@ -96,6 +97,38 @@ class CliTests(unittest.TestCase):
         smoke = runpy.run_path(str(root / "scripts/smoke_bundle.py"))["smoke"]
         source = f"import sys; sys.path.insert(0, {str(root / 'src')!r}); from copilot_chat_sync.cli import main; raise SystemExit(main())"
         smoke([sys.executable, "-c", source], __version__)
+
+    def test_installer_overwrites_program_and_preserves_config_and_backups(self):
+        scripts = Path(__file__).resolve().parents[1] / "scripts"
+        with patch.object(sys, "path", [str(scripts), *sys.path]):
+            verify = runpy.run_path(str(scripts / "build_windows.py"))["verify_installer"]
+        registry = types.SimpleNamespace(HKEY_CURRENT_USER=1, HKEY_LOCAL_MACHINE=2,
+                                         KEY_WOW64_32KEY=1, KEY_WOW64_64KEY=2, KEY_READ=4,
+                                         OpenKey=Mock(side_effect=FileNotFoundError))
+        operations = []
+
+        def install(executable, arguments):
+            if executable.name == "unins000.exe":
+                operations.append("uninstall")
+                for name in ("CopilotChatSync.exe", "CopilotChatSync-CLI.exe", "unins000.exe"):
+                    (executable.parent / name).unlink()
+                return
+            target = Path(next(argument.removeprefix("/DIR=") for argument in arguments if argument.startswith("/DIR=")))
+            operations.append("install")
+            target.mkdir(exist_ok=True)
+            for name in ("CopilotChatSync.exe", "CopilotChatSync-CLI.exe", "unins000.exe"):
+                (target / name).write_bytes(b"current program")
+
+        def smoke(command, version):
+            self.assertEqual(Path(command[0]).read_bytes(), b"current program")
+            self.assertEqual(version, __version__)
+
+        (self.root / "installer-user").mkdir()
+        with patch.dict(sys.modules, {"winreg": registry}), patch.dict(os.environ, {"LOCALAPPDATA": str(self.root / "installer-user")}):
+            with patch.dict(verify.__globals__, {"installer_process": install, "smoke": smoke, "smoke_desktop": Mock()}):
+                verify(self.root / "Setup.exe", __version__, self.root / "screenshot.png")
+        self.assertEqual(operations, ["install", "install", "uninstall"])
+        self.assertFalse((self.root / "installer-user/CopilotChatSync").exists())
 
     def test_init_preview_and_explicit_apply(self):
         arguments = ("init", "--store", str(self.root / "cloud"), "--storage-root", str(self.storage))

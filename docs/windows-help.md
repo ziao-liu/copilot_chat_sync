@@ -12,7 +12,7 @@ an inaccessible folder shows **Cannot read**. Opening the app does not migrate i
 1. Stop old link/sync scripts on every computer and close VS Code before any migration.
 2. Independently back up current project code and original chat files. Do not delete
    the OneDrive source, the whole workspace storage folder or your SQLite database.
-3. Select only the affected workspace and use **Review old setup**. Migration creates
+3. Select only the affected workspace and use **检查并迁移旧配置**. Migration creates
    independent local copies when Windows permits reading the source, preserves the
    old shared folder, and requires explicit preview/confirmation.
 4. If Windows still blocks the source, the app stops without applying changes. Locate
@@ -52,6 +52,6 @@ then generate ZIPs/checksums from the signed files. Store signing credentials on
 protected GitHub secrets or an identity-backed signing service, never in this repo,
 chat, command output or the distributed application.
 
-No signing identity is available for v0.1.3, so the release states `signed: false`.
+No signing identity is available for v0.1.4, so the release states `signed: false`.
 Download only from this repository's release page and verify the listed hashes; do
 not turn off Windows security or install an unverified root certificate.
