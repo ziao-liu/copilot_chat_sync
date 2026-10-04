@@ -1,5 +1,28 @@
 # Release Reviews
 
+## v0.1.2 Simplified Interface
+
+The daily panel is now a single-project, Chinese-language handoff page. Normal
+Send/Receive still obtain and consume the existing server preview ticket; only
+their redundant UI confirmation was removed. Risk-bearing actions retain explicit
+confirmation, and checkpoint quarantine retains its acknowledgement checkbox.
+Existing multi-workspace configs are not automatically changed. CLI and shared-store
+semantics are unchanged.
+
+Local validation covered 52 targeted panel, desktop, CLI and native-sync tests,
+then the full 83-test suite (80 passed, 3 Windows-only skipped), plus JavaScript
+syntax and frontend interaction checks. Checks exercise single-project selection,
+one-click preview/apply ordering, errors, process guards, demo write refusal, conflicts,
+ticket expiry, acknowledgement and migration. The source wheel's UI assets were verified.
+The desktop-rendering smoke probe now checks the handoff page and two transfer buttons,
+not the removed workspace rows and icon library.
+
+Integrated browser access to the SSH host was unavailable. Local headless Chromium
+could not launch because required system libraries were missing. No local visual
+or native Windows result is claimed. Tag publication remains gated on the full CI
+matrix, actual Windows packaging, native WebView2 rendering and installer smoke tests.
+Real two-PC cloud delivery and native Copilot continuation remain pilot requirements.
+
 ## v0.1.1 Desktop and Mount-Point Fix
 
 Date: 2026-09-21. Baseline: `3cb9f44`. OpenCodeReview delegation preview selected

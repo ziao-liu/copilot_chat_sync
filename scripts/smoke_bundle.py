@@ -52,7 +52,7 @@ def smoke_desktop(executable: Path, version: str, screenshot: Path) -> None:
                 raise RuntimeError("Native desktop screenshot is blank or incorrectly sized")
         screenshot.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image_path, screenshot)
-    print("Native desktop smoke passed: GUI subsystem, WebView2, authenticated UI, fonts/icons, screenshot and clean exit.")
+    print("Native desktop smoke passed: GUI subsystem, WebView2, authenticated handoff UI, screenshot and clean exit.")
 
 
 def smoke(command: list[str], version: str) -> None:

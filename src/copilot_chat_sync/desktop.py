@@ -53,11 +53,11 @@ def desktop_check(window, destination: Path) -> None:
             observer.disconnect();
             document.fonts.ready.then(() => resolve({
                 title: document.title,
-                version: document.getElementById('footer-version').textContent,
-                demo: !document.getElementById('demo-badge').hidden,
+                version: document.getElementById('version').textContent.replace(/^v/, ''),
+                demo: !document.getElementById('demo-banner').hidden,
                 error: !document.getElementById('error-banner').hidden,
-                rows: document.querySelectorAll('[data-select]').length,
-                icons: document.querySelectorAll('svg.lucide').length,
+                handoff: !document.getElementById('handoff').hidden,
+                actions: document.querySelectorAll('.transfer-actions button').length,
                 fonts: document.fonts.status,
                 overflow: document.documentElement.scrollWidth > innerWidth,
                 width: innerWidth, height: innerHeight
@@ -68,7 +68,7 @@ def desktop_check(window, destination: Path) -> None:
     })"""
     window.evaluate_js(script, callback=results.put)
     result = results.get(timeout=60)
-    if not isinstance(result, dict) or result.get("version") != __version__ or not result.get("demo") or result.get("error") or not result.get("rows") or not result.get("icons") or result.get("overflow") or result.get("fonts") != "loaded":
+    if not isinstance(result, dict) or result.get("version") != __version__ or not result.get("demo") or result.get("error") or not result.get("handoff") or result.get("actions") != 2 or result.get("overflow") or result.get("fonts") != "loaded":
         raise RuntimeError("Desktop rendering check failed: " + str(result))
     result["renderer"] = window.gui.renderer
     if sys.platform == "win32" and result["renderer"] != "edgechromium":

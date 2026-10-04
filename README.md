@@ -8,14 +8,14 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-![Workspace folders and chat transfers](docs/images/workspaces.png)
+Version 0.1.2 has a compact Chinese-language, single-page interface.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.1)
-  and download `CopilotChatSync-0.1.1-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.2)
+  and download `CopilotChatSync-0.1.2-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -44,38 +44,42 @@ For later launches, only the last command is needed.
 
 ## Set Up Once
 
-1. Check the detected OneDrive folder and local VS Code data location.
-   Use **Change locations** only when needed.
-2. Click **Continue**, then choose workspaces in the server/folder tree.
-   Missing project? Open it once in desktop VS Code, then **Scan again**.
-3. Click **Review setup**, close VS Code, and **Confirm & apply**.
+1. Check the prefilled shared folder. The local VS Code data location is detected
+   automatically; expand the data-location section only if detection is wrong.
+2. Click **选择项目** and select one project. Missing project? Open it once in desktop
+   VS Code using the intended SSH alias, then click **重新扫描**.
+3. Close VS Code, click **完成设置**, review the project/shared folder and confirm.
 
-![Choose workspaces by server and folder](docs/images/choose-workspaces.png)
-
-Repeat on the other computer using the **same cloud folder** and its own local workspaces.
+Repeat on the other computer using the **same cloud folder** and its corresponding local workspace.
 The local data folder on standard Windows VS Code is `%APPDATA%\Code\User\workspaceStorage`.
 
-> **One shared folder = one chat pool.** Receive imports that pool into every selected
-> workspace. The directory tree is visual grouping, not per-project isolation.
+> **One shared folder = one chat pool.** The simplified UI binds one workspace per
+> configuration. Existing multi-workspace configurations are not silently rewritten;
+> select one before transferring. Changing the SSH workspace does not create a new pool.
 > Use [separate groups](docs/advanced.md#separate-groups) for unrelated projects.
 
 ## Switch Computers
 
-1. **Computer A:** close VS Code, select **Send**, review and confirm.
+1. **Computer A:** close VS Code, click **发送本机记录**.
 2. Wait for OneDrive to finish uploading and downloading on **both computers**.
 3. **Computer B:** keep VS Code closed, send any existing local changes first,
-   resolve conflicts if needed, then **Receive**. Reopen VS Code afterward.
+   resolve conflicts if needed, then click **接收其他电脑记录**. Reopen VS Code afterward.
 
+Ordinary transfers automatically preview and apply through the existing safety
+checks, without additional confirmation dialogs. Conflicts and editing-checkpoint
+quarantine still require explicit choices. The main page shows total chat counts,
+not pending transfer counts, and the most recent operation in this app session.
 Send/Receive works on the local sync folder; success does not confirm cloud delivery.
 Conflicting versions are kept for review, not silently overwritten or combined.
-
-![Review competing chat versions](docs/images/conflicts.png)
+Backups are automatic; restore and diagnostics live under **设置**. Old-link migration
+appears only when the selected project needs it. Index repair is offered only when
+diagnostics identify an index/cache/schema issue.
 
 ## Before Your First Sync
 
 - Back up your chats and project code. Test with one non-editing conversation first.
 - Stop old sync/link scripts on **every computer**. For old directory links, use
-  **Review old setup**; use a new tool folder, not the old raw chat folder.
+  **检查并迁移旧配置**; use a new tool folder, not the old raw chat folder.
 - Editing-snapshot quarantine needs explicit confirmation and removes access to old
   undo/checkpoints. This tool does not sync project code or live editing state.
 - Keep the shared folder private. Chats/backups are not encrypted by this tool;
@@ -93,4 +97,4 @@ To update, close the app and install/extract the new release. Uninstalling keeps
 your chats, shared store and local configuration/backups.
 
 [Migration, recovery, CLI and limitations](docs/advanced.md).
-All screenshots use synthetic demo data. [MIT license](LICENSE).
+The demo uses synthetic data and is read-only. [MIT license](LICENSE).

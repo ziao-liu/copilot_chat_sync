@@ -260,6 +260,7 @@ class PanelTests(unittest.TestCase):
             snapshot = Panel(demo_path, demo=True).snapshot()
         self.assertTrue(snapshot["demo"])
         self.assertEqual(len(snapshot["workspaces"]), 4)
+        self.assertEqual(sum(workspace["bound"] for workspace in snapshot["workspaces"]), 1)
         self.assertEqual(len(snapshot["conflicts"]), 1)
         self.assertEqual(len(snapshot["backups"]), 4)
 

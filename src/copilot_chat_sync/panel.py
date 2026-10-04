@@ -457,7 +457,7 @@ def demo_config(root: Path) -> Path:
         workspace = Workspace.open(storage, identifier)
         before = read_keys(workspace.database)
         apply_updates(config, [WorkspaceUpdate(workspace, before, merge_keys(before, local))])
-        if number < 3:
+        if number == 0:
             config.bindings.append({"id": identifier, "uri": uri})
     config.save()
     return config.path

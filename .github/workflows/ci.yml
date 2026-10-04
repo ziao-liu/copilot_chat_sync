@@ -31,8 +31,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Test workspace hierarchy and selection
-        run: node tests/test_workspace_tree.js
+      - name: Test simplified handoff and safety gates
+        run: node tests/test_frontend.js
       - name: Verify module and installed CLI
         run: |
           python -m copilot_chat_sync --version

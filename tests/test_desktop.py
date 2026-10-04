@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
-from copilot_chat_sync.desktop import main, require_webview_runtime, run
+from copilot_chat_sync import __version__
+from copilot_chat_sync.desktop import desktop_check, main, require_webview_runtime, run
 from copilot_chat_sync.sessions import SyncError
 
 
@@ -99,6 +100,26 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as result:
             main(["--smoke-test", str(Path(self.temporary.name) / "report.json")])
         self.assertEqual(result.exception.code, 2)
+
+    def test_rendering_check_targets_simplified_handoff(self):
+        report = Path(self.temporary.name) / "rendering.json"
+        result = {"version": __version__, "demo": True, "error": False, "handoff": True,
+                  "actions": 2, "overflow": False, "fonts": "loaded"}
+
+        def evaluate(script, callback):
+            self.assertIn("getElementById('version')", script)
+            self.assertIn("getElementById('demo-banner')", script)
+            self.assertIn(".transfer-actions button", script)
+            callback(result.copy())
+
+        window = types.SimpleNamespace(events=types.SimpleNamespace(loaded=Mock()),
+                                       evaluate_js=evaluate, gui=types.SimpleNamespace(renderer="test"))
+        with patch("copilot_chat_sync.desktop.sys.platform", "linux"):
+            desktop_check(window, report)
+            self.assertEqual(json.loads(report.read_text())["actions"], 2)
+            result["actions"] = 1
+            with self.assertRaisesRegex(RuntimeError, "rendering check failed"):
+                desktop_check(window, Path(self.temporary.name) / "invalid.json")
 
     def test_main_selects_native_window_and_reports_failure(self):
         with patch("copilot_chat_sync.desktop.run") as application:

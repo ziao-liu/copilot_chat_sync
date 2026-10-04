@@ -194,14 +194,25 @@ API requests need a random per-launch token and valid Host/Origin. The URL fragm
 is removed from the address bar and kept in tab session storage. Do not share the
 private URL or expose the port to untrusted networks. Restart invalidates old tokens.
 
-Changes require a separate preview and confirmation. Tickets expire after two
+Every change requires a separate server preview ticket. The simplified UI automatically
+applies ordinary Send/Receive previews; setup, binding changes, conflicts, migration,
+repair, restore and checkpoint quarantine still require confirmation. Tickets expire after two
 minutes, are single-use and become invalid when input metadata changes. Closed-editor
 checks, local locks, conflict checks and recovery rules still run on apply. Quarantine
 also requires explicit acknowledgment. `--demo` refuses writes at the server.
 
-Fonts and icons are bundled with their third-party licenses. No telemetry, CDN or
+The simplified UI uses system fonts and no icon library. Legacy font/icon assets
+remain bundled with their licenses for compatibility. No telemetry, CDN or
 cloud API is used. Activity is kept in memory for the panel process; recovery
 journals persist. Writer IDs are historical authors, not online devices or an ACL.
+
+The main page has only the current project, shared folder, process/storage warnings,
+Send/Receive and the latest operation in this app session. Chat counts are totals,
+not pending transfer counts. Recovery and diagnostics are under Settings; migration
+and conflicts appear only when relevant. The UI selects one workspace per configuration;
+the CLI still supports explicit multi-workspace groups. Existing configurations are
+never automatically reduced or split. Selecting another workspace does not isolate
+its shared pool, and SSH aliases are never automatically merged.
 
 ## Command Reference
 
@@ -257,7 +268,7 @@ Node is only needed for frontend tests; it is not a runtime dependency.
 ```bash
 python -m pip install .
 python -m unittest discover -s tests -v
-node tests/test_workspace_tree.js
+node tests/test_frontend.js
 python -m pip wheel --no-deps --wheel-dir dist .
 ```
 
