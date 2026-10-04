@@ -181,6 +181,9 @@ async function main() {
 
     assert(!html.includes("<nav"));
     assert(html.includes('id="send"') && html.includes('id="receive"'));
+    assert(html.indexOf('id="send"') < html.indexOf('id="old-links"'));
+    assert(html.indexOf('id="receive"') < html.indexOf('id="conflict-notice"'));
+    assert(html.includes('<details id="issues" hidden>'));
     console.log("Frontend checks passed: single-project scope, one-click preflight/apply, error visibility, process guards, conflicts, demo, acknowledgement, expiry, migration, escaped and duplicate project labels.");
 }
 

@@ -58,6 +58,10 @@ def desktop_check(window, destination: Path) -> None:
                 error: !document.getElementById('error-banner').hidden,
                 handoff: !document.getElementById('handoff').hidden,
                 actions: document.querySelectorAll('.transfer-actions button').length,
+                actionsVisible: [...document.querySelectorAll('.transfer-actions button')].every(button => {
+                    const rect = button.getBoundingClientRect();
+                    return rect.top >= 0 && rect.bottom <= innerHeight;
+                }),
                 fonts: document.fonts.status,
                 overflow: document.documentElement.scrollWidth > innerWidth,
                 width: innerWidth, height: innerHeight
@@ -68,7 +72,7 @@ def desktop_check(window, destination: Path) -> None:
     })"""
     window.evaluate_js(script, callback=results.put)
     result = results.get(timeout=60)
-    if not isinstance(result, dict) or result.get("version") != __version__ or not result.get("demo") or result.get("error") or not result.get("handoff") or result.get("actions") != 2 or result.get("overflow") or result.get("fonts") != "loaded":
+    if not isinstance(result, dict) or result.get("version") != __version__ or not result.get("demo") or result.get("error") or not result.get("handoff") or result.get("actions") != 2 or not result.get("actionsVisible") or result.get("overflow") or result.get("fonts") != "loaded":
         raise RuntimeError("Desktop rendering check failed: " + str(result))
     result["renderer"] = window.gui.renderer
     if sys.platform == "win32" and result["renderer"] != "edgechromium":

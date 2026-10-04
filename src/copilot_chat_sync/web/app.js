@@ -150,12 +150,14 @@ async function loadState() {
     const project = currentProject(snapshot);
     byId("project-name").textContent = project ? workspaceLabel(project) : "尚未选择单个项目";
     byId("shared-location").textContent = `共享文件夹：${snapshot.config.store}`;
+    byId("shared-location").title = snapshot.config.store;
     byId("chat-counts").textContent = `聊天总数（非待同步数量）：本机 ${project?.sessions ?? "未知"} · 共享池 ${snapshot.shared?.sessions ?? "未知"}`;
     const reason = blockedReason(snapshot);
     byId("status").textContent = reason || (snapshot.demo ? "只读演示，可查看预检结果。" : "可以操作，VS Code 已关闭。");
     byId("status").className = `notice ${reason ? "warning" : "good"}`;
     byId("issues").hidden = !snapshot.issues.length;
-    byId("issues").replaceChildren(...snapshot.issues.map((issue) => {
+    byId("issue-summary").textContent = `技术提示（${snapshot.issues.length}）`;
+    byId("issue-list").replaceChildren(...snapshot.issues.map((issue) => {
         const paragraph = document.createElement("p");
         paragraph.textContent = issue;
         return paragraph;

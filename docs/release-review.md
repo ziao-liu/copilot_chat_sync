@@ -1,5 +1,18 @@
 # Release Reviews
 
+## v0.1.3 First-Screen Layout
+
+The v0.1.2 Windows release workflow succeeded, including native rendering and
+installer checks. Its actual screenshot showed optional warnings pushing the
+transfer buttons to the viewport edge. This follow-up places actions before
+optional warnings, collapses technical messages and shortens long shared-folder
+paths with full-path access retained. Conflict and migration actions remain visible;
+no safety checks or acknowledgements are removed.
+
+Native rendering now checks that both transfer buttons are fully inside the
+initial viewport. Regressions cover offscreen-button rejection and frontend
+ordering. Publication remains gated on the full test matrix and Windows smoke tests.
+
 ## v0.1.2 Simplified Interface
 
 The daily panel is now a single-project, Chinese-language handoff page. Normal

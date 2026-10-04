@@ -55,7 +55,10 @@
                 <p id="shared-location" class="path"></p>
                 <p id="chat-counts" class="hint"></p>
                 <div id="status" class="notice" role="status"></div>
-                <div id="issues" class="notice warning" hidden></div>
+                <div class="transfer-actions">
+                    <button id="send" class="primary" type="button">发送本机记录</button>
+                    <button id="receive" type="button">接收其他电脑记录</button>
+                </div>
                 <div id="old-links" class="notice warning" hidden>
                     <p>发现旧的聊天目录链接。先停止两台电脑上的旧同步脚本，再迁移为独立本机记录。</p>
                     <button id="migrate" type="button">检查并迁移旧配置</button>
@@ -64,10 +67,7 @@
                     <p id="conflict-message"></p>
                     <button id="resolve-conflicts" type="button">处理冲突</button>
                 </div>
-                <div class="transfer-actions">
-                    <button id="send" class="primary" type="button">发送本机记录</button>
-                    <button id="receive" type="button">接收其他电脑记录</button>
-                </div>
+                <details id="issues" hidden><summary id="issue-summary">技术提示</summary><div id="issue-list"></div></details>
                 <p class="hint">发送 → 等两台电脑的云盘同步完成 → 在另一台电脑接收。两边操作时都须关闭 VS Code。</p>
                 <p class="hint">仅搬运聊天记录，不同步项目代码、终端和编辑检查点。共享文件夹中的记录未加密。</p>
                 <p id="last-operation" role="status" aria-live="polite"></p>

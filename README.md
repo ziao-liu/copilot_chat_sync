@@ -8,14 +8,15 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-Version 0.1.2 has a compact Chinese-language, single-page interface.
+Version 0.1.3 has a compact Chinese-language, single-page interface with transfer
+buttons kept above optional warnings.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.2)
-  and download `CopilotChatSync-0.1.2-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.3)
+  and download `CopilotChatSync-0.1.3-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -74,6 +75,8 @@ Conflicting versions are kept for review, not silently overwritten or combined.
 Backups are automatic; restore and diagnostics live under **设置**. Old-link migration
 appears only when the selected project needs it. Index repair is offered only when
 diagnostics identify an index/cache/schema issue.
+Technical storage warnings can be expanded below the main controls. Long shared-folder
+paths are shortened on the main page; hover or open Settings to see the full path.
 
 ## Before Your First Sync
 

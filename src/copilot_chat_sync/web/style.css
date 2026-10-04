@@ -8,11 +8,11 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; }
-main { max-width: 760px; margin: 48px auto; padding: 0 24px; }
+main { max-width: 760px; margin: 28px auto; padding: 0 24px; }
 header, .project-heading, .dialog-heading, .footer-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
-header { margin-bottom: 28px; }
+header { margin-bottom: 20px; }
 h1 { font-size: 26px; margin: 0; }
 h2 { font-size: 18px; margin: 0 0 12px; }
 header p { margin: 4px 0 0; color: #637187; }
@@ -30,18 +30,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
     outline: 3px solid #779dea; outline-offset: 3px;
 }
 .card {
-    background: white; border: 1px solid #dfe5ee; border-radius: 14px; padding: 26px;
+    background: white; border: 1px solid #dfe5ee; border-radius: 14px; padding: 22px;
 }
 .project-heading h2 { margin: 0; }
 .project-name { font-weight: 600; overflow-wrap: anywhere; }
 .path, pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hint, footer, .footer-row { font-size: 13px; color: #58677c; }
-.notice { border-radius: 8px; background: #edf3fc; padding: 12px 16px; margin: 16px 0; overflow-wrap: anywhere; }
+.notice { border-radius: 8px; background: #edf3fc; padding: 10px 14px; margin: 12px 0; overflow-wrap: anywhere; }
 .notice.good { background: #eaf6ef; color: #21553b; }
 .notice.warning { background: #fff4db; color: #694a11; }
 .notice.error { background: #fcecec; color: #8e2525; }
-.transfer-actions { display: flex; gap: 12px; margin-top: 24px; }
-.transfer-actions button { flex: 1; padding: 16px 12px; font-weight: 600; }
+.transfer-actions { display: flex; gap: 12px; margin-top: 16px; }
+.transfer-actions button { flex: 1; padding: 12px; font-weight: 600; }
 .footer-row { border-top: 1px solid #e3e8ef; padding-top: 16px; margin-top: 24px; }
 footer { margin-top: 22px; text-align: center; }
 label { display: block; font-weight: 600; margin: 16px 0 6px; }

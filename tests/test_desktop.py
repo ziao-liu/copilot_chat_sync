@@ -104,12 +104,13 @@ class DesktopTests(unittest.TestCase):
     def test_rendering_check_targets_simplified_handoff(self):
         report = Path(self.temporary.name) / "rendering.json"
         result = {"version": __version__, "demo": True, "error": False, "handoff": True,
-                  "actions": 2, "overflow": False, "fonts": "loaded"}
+                  "actions": 2, "actionsVisible": True, "overflow": False, "fonts": "loaded"}
 
         def evaluate(script, callback):
             self.assertIn("getElementById('version')", script)
             self.assertIn("getElementById('demo-banner')", script)
             self.assertIn(".transfer-actions button", script)
+            self.assertIn("rect.bottom <= innerHeight", script)
             callback(result.copy())
 
         window = types.SimpleNamespace(events=types.SimpleNamespace(loaded=Mock()),
@@ -120,6 +121,10 @@ class DesktopTests(unittest.TestCase):
             result["actions"] = 1
             with self.assertRaisesRegex(RuntimeError, "rendering check failed"):
                 desktop_check(window, Path(self.temporary.name) / "invalid.json")
+            result["actions"] = 2
+            result["actionsVisible"] = False
+            with self.assertRaisesRegex(RuntimeError, "rendering check failed"):
+                desktop_check(window, Path(self.temporary.name) / "offscreen.json")
 
     def test_main_selects_native_window_and_reports_failure(self):
         with patch("copilot_chat_sync.desktop.run") as application:

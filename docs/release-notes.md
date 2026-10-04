@@ -1,10 +1,15 @@
-# v0.1.2 Simplified Desktop Preview
+# v0.1.3 Simplified Desktop Preview
 
 Windows x64 preview of Copilot Chat Sync, an unofficial tool for legacy
 VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Changes
 
+- Follow-up to v0.1.2: transfer buttons stay above optional warnings, technical
+  storage messages are expandable, and long shared-folder paths are shortened
+  with the full path available on hover or in Settings.
+- Native Windows rendering checks now require both transfer buttons to be
+  visible in the initial viewport, including the conflict-bearing demo.
 - Compact Chinese-language, single-page interface: current project, shared folder,
   status, Send and Receive. No sidebar, workspace tree or decorative statistics.
 - Ordinary Send/Receive automatically preview and apply with one click. Existing
@@ -23,11 +28,11 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Downloads
 
-- `CopilotChatSync-0.1.2-windows-x64-Setup.exe`: per-user installer and Start menu shortcut.
+- `CopilotChatSync-0.1.3-windows-x64-Setup.exe`: per-user installer and Start menu shortcut.
   No Python installation required; offers the Microsoft-signed WebView2 Runtime installer if needed.
-- `CopilotChatSync-0.1.2-windows-x64-portable.zip`: extract the entire folder, then open
+- `CopilotChatSync-0.1.3-windows-x64-portable.zip`: extract the entire folder, then open
   `CopilotChatSync.exe`. Keep all files together; install WebView2 Runtime if missing.
-- `CopilotChatSync-0.1.2-desktop.png`: desktop-rendering screenshot from Windows CI using synthetic data.
+- `CopilotChatSync-0.1.3-desktop.png`: desktop-rendering screenshot from Windows CI using synthetic data.
 - `SHA256SUMS.txt`: download integrity checksums.
 
 Close the app before upgrading or uninstalling. Uninstall removes the program,
