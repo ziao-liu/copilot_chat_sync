@@ -52,6 +52,6 @@ then generate ZIPs/checksums from the signed files. Store signing credentials on
 protected GitHub secrets or an identity-backed signing service, never in this repo,
 chat, command output or the distributed application.
 
-No signing identity is available for v0.1.5, so the release states `signed: false`.
+No signing identity is available for v0.1.6, so the release states `signed: false`.
 Download only from this repository's release page and verify the listed hashes; do
 not turn off Windows security or install an unverified root certificate.

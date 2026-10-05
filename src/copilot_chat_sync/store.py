@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from .progress import file_checked, report
 
 from .safety import atomic_write, atomic_write_chunks, is_regular, plain_path
 from .sessions import MAX_SNAPSHOT_BYTES, SyncError, _json_size, canonical_bytes, canonical_chunks, chunks_digest, digest, file_digest, json_loads, load_json, normalize, read_stable, session_id
@@ -86,6 +87,7 @@ class Store:
                         if data != envelope["session"]:
                             raise SyncError(f"Revision contains unsupported session-level state: {path}")
                         graph[path.stem] = Revision(path.stem, tuple(parents), envelope["writer"], digest(data), path=path)
+                        file_checked()
                     for revision in graph.values():
                         missing = set(revision.parents) - graph.keys()
                         if missing:
@@ -93,6 +95,7 @@ class Store:
                     if graph:
                         graphs[identifier] = graph
             self.graphs = graphs
+            report("检查历史版本关系")
             for identifier in graphs:
                 if not self.heads(identifier):
                     raise SyncError(f"Revision graph has no head: {identifier}")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-chat-sync"
-version = "0.1.5"
+version = "0.1.6"
 description = "Conservative, offline-first synchronization of legacy VS Code Copilot chats"
 readme = "README.md"
 license = "MIT"

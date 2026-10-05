@@ -9,6 +9,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator
+from .progress import report
 
 from .sessions import SyncError, file_chunks
 
@@ -47,8 +48,14 @@ def atomic_write_chunks(path: Path, chunks: Iterable[bytes]) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as stream:
+            reported = 0
+            report("写入文件", path.name)
             for chunk in chunks:
                 stream.write(chunk)
+                if stream.tell() - reported >= 1024 * 1024:
+                    reported = stream.tell()
+                    report("写入文件", path.name, reported)
+            report("保存文件到磁盘", path.name, stream.tell())
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

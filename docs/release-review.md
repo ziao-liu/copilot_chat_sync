@@ -1,5 +1,21 @@
 # Release Reviews
 
+## v0.1.6 Visible Check and Transfer Progress
+
+Check/apply dialogs now use native HTML progress bars and an authenticated,
+request-specific polling endpoint outside the operation lock. Worker-local
+context reporting publishes actual file bytes, stage, elapsed time and verified
+revision count. Unknown totals remain indeterminate; no overall percentage or
+cloud transfer progress is claimed. Background reads cannot start a second
+operation, and stale polling results cannot update a subsequent dialog.
+
+Tests cover concurrent HTTP polling during a held operation, authentication,
+request ID isolation, failure completion, byte counters, rendering and timer
+cleanup. A real >129 MiB retained first snapshot passed the complete handoff
+with reporting enabled at 285.6 MiB sampled peak RSS in 36.8 seconds locally.
+This release retains all data-safety checks and does not remove repeated
+full-history checks or promise a performance improvement.
+
 ## v0.1.5 Giant Initial Snapshots
 
 The v0.1.4 large-log tests did not cover an initial snapshot above 128 MiB.

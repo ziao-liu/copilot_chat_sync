@@ -1,11 +1,21 @@
-# v0.1.5 Giant Initial Snapshot Preview
+# v0.1.6 Check and Transfer Progress Preview
 
 Windows x64 preview of Copilot Chat Sync, an unofficial tool for legacy
 VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Changes
 
-- Fixes `JSONL record at line 1 exceeds 128 MiB`: initial records now use an
+- Adds a progress bar to the check and apply dialogs. Shows the current processing
+  stage, file name, actual bytes read/written, verified shared revision count and
+  elapsed time. The percentage is for the current file's reading pass, **not**
+  the whole operation. Hashing/serialization and writes without a known total
+  use an indeterminate bar; there is no estimated countdown.
+- Authenticated progress polling remains responsive while a check holds the
+  operation lock. Each request has its own progress ID; failed/completed requests
+  stop polling and old request results cannot replace a new dialog's progress.
+- No new daily controls or runtime dependencies. Existing safety checks remain.
+  This release provides visibility, not a full-history scanning speed improvement.
+- Retains the v0.1.5 fix for `JSONL record at line 1 exceeds 128 MiB`: initial records use an
   incremental JSON parser, including giant individual strings. The limit is
   consistent across native JSON, records, live state, shared revisions and
   compact imports: 2 GiB. Total native JSONL logs retain an 8 GiB ceiling.
@@ -30,10 +40,10 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Downloads
 
-- `CopilotChatSync-0.1.5-windows-x64-Setup.exe`: installer; no Python required.
-- `CopilotChatSync-0.1.5-windows-x64-portable.zip`: extract the entire folder and
+- `CopilotChatSync-0.1.6-windows-x64-Setup.exe`: installer; no Python required.
+- `CopilotChatSync-0.1.6-windows-x64-portable.zip`: extract the entire folder and
   open `CopilotChatSync.exe`. Keep all files together.
-- `CopilotChatSync-0.1.5-desktop.png`: actual Windows CI screenshot with synthetic data.
+- `CopilotChatSync-0.1.6-desktop.png`: actual Windows CI screenshot with synthetic data.
 - `SHA256SUMS.txt`: download integrity checksums.
 
 **Upgrade:** close the app, then run the new Setup into the same directory.
@@ -43,6 +53,13 @@ into a new folder to avoid leftover old runtime files.
 
 ## Validation and Limits
 
+Progress checks cover real byte counts, concurrent polling while a preview is
+blocked, authentication, request isolation, failure cleanup, determinate and
+indeterminate UI rendering, and polling timer cleanup. A physical 135,266,484-byte
+first record passed the complete handoff with reporting enabled at 285.6 MiB
+sampled peak RSS. The full existing platform/packaging gates remain in place.
+
+Prior v0.1.5 large-file validation:
 Physical synthetic FIRST records of 135,266,484 bytes (retained giant chat) and
 537,919,668 bytes (later reduced by a valid mutation) passed local Send/Receive,
 shared reload, re-send, plain JSON export and complete raw backup/restore.

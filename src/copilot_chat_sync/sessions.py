@@ -17,6 +17,7 @@ from typing import Any, BinaryIO, Callable
 
 import ijson
 import psutil
+from .progress import report
 
 MAX_SESSION_BYTES = 128 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
@@ -94,6 +95,7 @@ def _canonical_parts(value: Any, depth: int = 0) -> Iterator[str]:
 
 
 def canonical_chunks(value: Any, newline: bool = False, check_size: bool = True) -> Iterator[bytes]:
+    report("计算快照大小与校验值")
     guard = MemoryGuard()
     guard.check(force=True)
     total = 0
@@ -145,10 +147,13 @@ def stable_file(path: Path, limit: int) -> Iterator[BinaryIO]:
 def file_chunks(path: Path) -> Iterator[bytes]:
     with stable_file(path, MAX_LOG_BYTES) as stream:
         total = 0
+        size = os.fstat(stream.fileno()).st_size
+        report("校验或复制原始文件", path.name, total, size)
         while chunk := stream.read(FILE_CHUNK_BYTES):
             total += len(chunk)
             if total > MAX_LOG_BYTES:
                 raise SyncError(f"File exceeds {MAX_LOG_BYTES} bytes: {path}")
+            report("校验或复制原始文件", path.name, total, size)
             yield chunk
 
 
@@ -176,6 +181,7 @@ class JSONReader:
         self.count = 0
         self.finished = False
         self.nonempty = False
+        self.size = os.fstat(stream.fileno()).st_size
 
     def read(self, size: int = -1) -> bytes:
         if size == 0 or self.finished:
@@ -194,6 +200,7 @@ class JSONReader:
             raise SyncError("JSON record exceeds 2 GiB; the source file was not modified")
         self.finished = not data or (self.line and data.endswith(b"\n"))
         self.nonempty = self.nonempty or bool(data.strip(b" \t\r\n"))
+        report("读取并重放聊天文件", Path(self.stream.name).name, self.stream.tell(), self.size)
         return data
 
 
@@ -233,6 +240,7 @@ def _read_json(reader: JSONReader, allow_empty: bool = False) -> Any:
 def load_json(path: Path) -> Any:
     try:
         with stable_file(path, MAX_SNAPSHOT_BYTES) as stream:
+            report("读取聊天快照", path.name, 0, os.fstat(stream.fileno()).st_size)
             prefix = stream.read(3)
             return _read_json(JSONReader(stream, MemoryGuard(), prefix=b"" if prefix == b"\xef\xbb\xbf" else prefix))
     except MemoryError as error:

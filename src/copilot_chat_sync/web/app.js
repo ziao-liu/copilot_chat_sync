@@ -5,6 +5,50 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character
 const storageKey = `copilot-chat-sync-token:${location.origin}`;
 const state = { snapshot: null, busy: false, setup: null, preview: null };
 let planTimer;
+let progressSequence = 0;
+
+function progressBody() {
+    return '<progress id="operation-progress" aria-label="当前文件读取进度"></progress><p id="progress-detail" role="status" aria-live="polite">准备检查…</p><p class="hint">百分比仅表示当前文件读取进度，不是整个操作进度。校验阶段没有固定百分比；请勿启动 VS Code 或关闭应用。</p>';
+}
+
+function renderProgress(progress, seconds) {
+    const bar = byId("operation-progress");
+    const detail = byId("progress-detail");
+    if (!bar || !detail) return;
+    if (progress.total > 0) {
+        bar.max = progress.total;
+        bar.value = Math.min(progress.done, progress.total);
+    } else {
+        bar.removeAttribute("value");
+    }
+    const size = progress.done > 0 ? ` · ${(progress.done / 1048576).toFixed(1)}${progress.total ? ` / ${(progress.total / 1048576).toFixed(1)}` : ""} MiB` : "";
+    detail.textContent = `${progress.stage || "等待检查开始"}${progress.file ? ` · ${progress.file}` : ""}${size} · 已校验共享版本 ${progress.files || 0} 个 · 已用时 ${seconds} 秒`;
+}
+
+async function progressApi(path, data) {
+    const identifier = `${Date.now()}-${++progressSequence}`;
+    const started = Date.now();
+    let polling = false;
+    let stopped = false;
+    const timer = setInterval(async () => {
+        if (polling || stopped) return;
+        polling = true;
+        try {
+            const progress = await api(`/api/progress?${identifier}`);
+            if (!stopped) renderProgress(progress, Math.floor((Date.now() - started) / 1000));
+        } catch (error) {
+            if (!stopped && byId("progress-detail")) byId("progress-detail").textContent = `进度暂时不可用：${friendlyError(error)}。操作请求仍在等待结果，请勿重复执行。`;
+        } finally {
+            polling = false;
+        }
+    }, 750);
+    try {
+        return await api(`${path}?${identifier}`, data);
+    } finally {
+        stopped = true;
+        clearInterval(timer);
+    }
+}
 
 function tokenFromFragment() {
     try { return new URLSearchParams(decodeURIComponent(location.hash.slice(1))).get("token"); }
@@ -296,8 +340,9 @@ function scanSetup() {
 async function applyTicket(plan, acknowledge = false) {
     clearInterval(planTimer);
     state.preview = null;
-    dialog("正在处理", "<p>请勿启动 VS Code 或关闭应用。</p>", []);
-    const result = await api("/api/apply", { plan: plan.plan, acknowledge });
+    dialog("正在处理", progressBody(), []);
+    const result = await progressApi("/api/apply", { plan: plan.plan, acknowledge });
+    byId("progress-detail").textContent = "操作已完成，正在刷新聊天状态…";
     await loadState();
     byId("modal").close();
     if (result.conflicts?.length) showConflicts();
@@ -324,9 +369,9 @@ function planBody(plan, options) {
 
 function preview(options) {
     return task(async () => {
-        dialog("正在检查", "<p>检查记录、冲突和备份条件，不会跳过安全校验。大日志可能需要几分钟，请勿启动 VS Code。</p>", []);
+        dialog("正在检查", progressBody(), []);
         let plan;
-        try { plan = await api("/api/preview", options); }
+        try { plan = await progressApi("/api/preview", options); }
         catch (error) {
             const actions = [{ label: "关闭", run: closeDialog }];
             if (["pull", "repair"].includes(options.action) && !options.detach && error.message.includes("Editing snapshots")) {

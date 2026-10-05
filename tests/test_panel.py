@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from copilot_chat_sync.panel import ASSETS, Panel, PanelError, PanelServer, demo_config
+from copilot_chat_sync.progress import report
 from copilot_chat_sync.sessions import SyncError, native_bytes, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.workspace import Config
@@ -66,6 +67,43 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.request("/api/preview", {}, headers={"Origin": "https://attacker.example"})[0], 403)
         self.assertEqual(self.request("/api/state", headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
         self.assertEqual(self.request("/api/state", headers={"Authorization": "Bearer \u00e9"})[0], 401)
+
+    def test_progress_is_authenticated_and_available_during_exclusive_work(self):
+        started, finish = threading.Event(), threading.Event()
+        replies = []
+
+        def execute(options, apply):
+            report("读取并重放聊天文件", "synthetic.jsonl", 1024, 4096)
+            started.set()
+            if not finish.wait(5):
+                raise SyncError("Progress test timed out")
+            return {"would_publish": 0}
+
+        with patch.object(self.panel, "_execute", side_effect=execute):
+            worker = threading.Thread(target=lambda: replies.append(self.request("/api/preview?123-1", {"action": "push", "workspaces": [WID]})))
+            worker.start()
+            try:
+                self.assertTrue(started.wait(3))
+                self.assertEqual(self.request("/api/progress?123-1", authenticated=False)[0], 401)
+                status, progress = self.request("/api/progress?123-1")
+                self.assertEqual(status, 200)
+                self.assertTrue(progress["active"])
+                self.assertEqual((progress["done"], progress["total"]), (1024, 4096))
+                self.assertEqual(progress["file"], "synthetic.jsonl")
+                self.assertEqual(self.request("/api/progress?123-2")[1], {})
+                self.assertEqual(self.request("/api/state")[0], 409)
+            finally:
+                finish.set()
+                worker.join(5)
+            self.assertEqual(replies[0][0], 200)
+            self.assertFalse(self.request("/api/progress?123-1")[1]["active"])
+
+    def test_failed_preview_finishes_progress_and_invalid_id_is_rejected(self):
+        with patch.object(self.panel, "_execute", side_effect=SyncError("bad chat")):
+            status, _ = self.request("/api/preview?123-2", {"action": "push", "workspaces": [WID]})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.request("/api/progress?123-2")[1]["active"])
+        self.assertEqual(self.request("/api/preview?invalid", {"action": "push", "workspaces": [WID]})[0], 400)
 
     def test_conflict_preview_is_bounded_without_truncating_stored_chat(self):
         data = normalize(sample("x" * 5000), SID)

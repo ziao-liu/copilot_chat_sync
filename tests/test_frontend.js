@@ -13,6 +13,7 @@ function harness(snapshot, responses = []) {
         constructor(id) { this.id = id; this.dataset = {}; this.value = ""; this.hidden = false; this.listeners = {}; }
         addEventListener(name, callback) { this.listeners[name] = callback; }
         setAttribute() {}
+        removeAttribute(name) { delete this[name]; }
         replaceChildren(...children) { this.children = children; }
         append(child) {
             this.children.push(child);
@@ -29,12 +30,15 @@ function harness(snapshot, responses = []) {
     }
     for (const match of html.matchAll(/id="([^"]+)"/g)) elements.set(match[1], new Element(match[1]));
     const calls = [];
+    const timers = new Map();
+    let timerSequence = 0;
     const context = {
         URL, URLSearchParams, Date, console,
         location: { origin: "http://127.0.0.1:1234", hash: "", pathname: "/" },
         sessionStorage: { getItem: () => "", setItem() {} },
         history: { replaceState() {} },
-        setInterval: () => 1, clearInterval() {},
+        setInterval: (callback) => { const id = ++timerSequence; timers.set(id, callback); return id; },
+        clearInterval: (id) => timers.delete(id),
         document: {
             getElementById: (id) => elements.get(id) || null,
             querySelectorAll: () => [...elements.values()],
@@ -52,7 +56,7 @@ function harness(snapshot, responses = []) {
     vm.runInContext(source, context);
     context.snapshot = snapshot;
     vm.runInContext("state.snapshot = snapshot", context);
-    return { context, calls, elements, run: (code) => vm.runInContext(code, context) };
+    return { context, calls, elements, timers, run: (code) => vm.runInContext(code, context) };
 }
 
 const project = { id: "one", uri: "vscode-remote://ssh-remote%2Bnipie/home/demo/project", bound: true, sessions: 3 };
@@ -65,6 +69,33 @@ const ticket = (result = {}, extra = {}) => ({ plan: "verified-ticket", expires_
 
 async function main() {
     let h = harness(base());
+    h.run('dialog("正在检查", progressBody(), []); renderProgress({stage:"读取",file:"<file>",done:1048576,total:2097152,files:2},3)');
+    assert.strictEqual(h.elements.get("operation-progress").value, 1048576);
+    assert.strictEqual(h.elements.get("operation-progress").max, 2097152);
+    assert(h.elements.get("progress-detail").textContent.includes("<file>"));
+    assert(h.elements.get("progress-detail").textContent.includes("1.0 / 2.0 MiB"));
+    assert(h.elements.get("modal-body").innerHTML.includes("不是整个操作进度"));
+    h.run('renderProgress({stage:"计算校验值",files:2},4)');
+    assert.strictEqual(h.elements.get("operation-progress").value, undefined);
+    let finishProgress;
+    h.context.fetch = async (url) => {
+        if (url.startsWith("/api/progress?")) return {ok:true,status:200,json:async () => ({stage:"读取",done:1,total:2})};
+        return new Promise((resolve) => { finishProgress = () => resolve({ok:true,status:200,json:async () => ({done:true})}); });
+    };
+    const progressRequest = h.run('progressApi("/api/preview", {})');
+    assert.strictEqual(h.timers.size, 1);
+    const poll = [...h.timers.values()][0];
+    await poll();
+    assert.strictEqual(h.elements.get("operation-progress").value, 1);
+    finishProgress();
+    await progressRequest;
+    assert.strictEqual(h.timers.size, 0);
+    await poll();
+    assert.strictEqual(h.timers.size, 0);
+    h = harness(base(), [{error:"bad chat"}]);
+    await assert.rejects(h.run('progressApi("/api/preview", {})'), /bad chat/);
+    assert.strictEqual(h.timers.size, 0);
+    h = harness(base());
     assert.strictEqual(h.run("workspaceLabel(snapshot.workspaces[0])"), "nipie · /home/demo/project");
     assert.strictEqual(h.run("workspaceLabel({uri: 'file:///C:/project'})"), "本机 · /C:/project");
     assert.strictEqual(h.run("escapeHtml('<script>\"&')"), "&lt;script&gt;&quot;&amp;");
@@ -92,7 +123,8 @@ async function main() {
         const result = action === "push" ? { operation: action, published: 1 } : { operation: action, files: 2 };
         h = harness(base(), [ticket(), result, base()]);
         await h.run(`handoff('${action}')`);
-        assert.deepStrictEqual(h.calls.map((call) => call.url), ["/api/preview", "/api/apply", "/api/state"]);
+        assert.deepStrictEqual(h.calls.map((call) => call.url.split("?")[0]), ["/api/preview", "/api/apply", "/api/state"]);
+        assert.notStrictEqual(h.calls[0].url.split("?")[1], h.calls[1].url.split("?")[1]);
         assert.deepStrictEqual(h.calls[0].body, { action, workspaces: ["one"] });
         assert.deepStrictEqual(h.calls[1].body, { plan: "verified-ticket", acknowledge: false });
         assert.strictEqual(h.elements.get("modal").open, false);
@@ -144,7 +176,7 @@ async function main() {
 
     h = harness(base(), [ticket(), { error: "Preview expired or files changed" }]);
     await h.run("handoff('push')");
-    assert.deepStrictEqual(h.calls.map((call) => call.url), ["/api/preview", "/api/apply"]);
+    assert.deepStrictEqual(h.calls.map((call) => call.url.split("?")[0]), ["/api/preview", "/api/apply"]);
     assert(h.elements.get("error-message").textContent.includes("刷新后重试"));
     assert(h.elements.get("modal-body").innerHTML.includes("不要把此状态当作同步成功"));
 

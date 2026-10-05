@@ -23,6 +23,7 @@ from typing import Iterator
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from .progress import Progress, report
 from .safety import code_processes, is_redirect
 from .sessions import SyncError, canonical_bytes, native_bytes, normalize, session_id
 from .store import REVISION_ID, Store
@@ -93,13 +94,20 @@ class Panel:
         self.lock = threading.Lock()
         self.plan: dict | None = None
         self.activity: list[dict] = []
+        self.progress = Progress()
 
     @contextmanager
-    def exclusive(self) -> Iterator[None]:
+    def exclusive(self, progress_id: str = "") -> Iterator[None]:
         if not self.lock.acquire(blocking=False):
             raise PanelError("Another panel operation is in progress", 409)
         try:
-            yield
+            if progress_id:
+                if len(progress_id) > 64 or any(character not in "0123456789-" for character in progress_id):
+                    raise PanelError("Invalid progress ID")
+                with self.progress.track(progress_id):
+                    yield
+            else:
+                yield
         finally:
             self.lock.release()
 
@@ -249,8 +257,10 @@ class Panel:
         options = _options(data)
         self.plan = None
         try:
+            report("检查文件是否稳定")
             before = self._stamp(options)
             result = self._execute(options, False)
+            report("确认预检期间文件未变化")
             if self._stamp(options) != before:
                 raise PanelError("Files changed during preview. Refresh and preview again.", 409)
         except OSError as error:
@@ -398,6 +408,9 @@ class PanelHandler(BaseHTTPRequestHandler):
             url = urlsplit(self.path)
             api = url.path.startswith("/api/")
             self._authorize(api, write)
+            if not write and url.path == "/api/progress":
+                self._reply(200, canonical_bytes(self.server.panel.progress.snapshot(url.query)))
+                return
             if not api:
                 if write:
                     raise PanelError("Not found", 404)
@@ -410,7 +423,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                     raise PanelError("Not found", 404)
                 self._reply(200, (ASSETS / asset[0]).read_bytes(), asset[1])
                 return
-            with self.server.panel.exclusive():
+            with self.server.panel.exclusive(url.query if write else ""):
                 if write:
                     data = self._body()
                     if url.path == "/api/preview":
