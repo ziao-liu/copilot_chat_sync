@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from .progress import file_checked, report
+from .cache import current, signature
+from .index import index_entry
 
 from .safety import atomic_write, atomic_write_chunks, is_regular, plain_path
 from .sessions import MAX_SNAPSHOT_BYTES, SyncError, _json_size, canonical_bytes, canonical_chunks, chunks_digest, digest, file_digest, json_loads, load_json, normalize, read_stable, session_id
@@ -23,6 +25,8 @@ class Revision:
     content_hash: str
     path: Path | None = None
     data: dict[str, Any] | None = None
+    entry: dict[str, Any] | None = None
+    request_count: int = 0
 
     @property
     def session(self) -> dict[str, Any]:
@@ -30,8 +34,12 @@ class Revision:
             return self.data
         if self.path is None:
             raise SyncError("Revision has no payload")
+        cache = current.get()
+        before, _, saved = cache.lookup(self.path, "revision") if cache else (None, "", None)
         envelope = load_json(self.path)
-        if digest(envelope) != self.revision:
+        if before is not None and signature(self.path) != before:
+            raise SyncError(f"Revision changed while reading: {self.path}")
+        if (saved is None or saved.get("revision") != self.revision) and digest(envelope) != self.revision:
             raise SyncError(f"Revision changed after scanning: {self.path}")
         return envelope["session"]
 
@@ -72,6 +80,15 @@ class Store:
                         plain_path(path, self.root)
                         if path.suffix != ".json" or not REVISION_ID.fullmatch(path.stem) or not is_regular(path):
                             raise SyncError(f"Unexpected revision/conflict copy: {path}")
+                        cache = current.get()
+                        before, raw_hash, saved = cache.lookup(path, "revision") if cache else (None, "", None)
+                        if saved is not None:
+                            if saved.get("revision") != path.stem:
+                                raise SyncError(f"Invalid cached revision ID: {path}")
+                            graph[path.stem] = Revision(path.stem, tuple(saved["parents"]), saved["writer"],
+                                                        saved["content_hash"], path=path, entry=saved["entry"], request_count=saved["requests"])
+                            file_checked()
+                            continue
                         envelope = load_json(path)
                         if not isinstance(envelope, dict) or set(envelope) != {"schema", "parents", "session", "writer"} or envelope["schema"] != 1:
                             raise SyncError(f"Unsupported revision format: {path}")
@@ -83,10 +100,17 @@ class Store:
                         if len(set(parents)) != len(parents) or path.stem in parents:
                             raise SyncError(f"Invalid revision ancestry: {path}")
                         session_id(envelope["writer"])
-                        data = normalize(envelope["session"], identifier)
+                        data = normalize(envelope["session"], identifier, copy_requests=False)
                         if data != envelope["session"]:
                             raise SyncError(f"Revision contains unsupported session-level state: {path}")
-                        graph[path.stem] = Revision(path.stem, tuple(parents), envelope["writer"], digest(data), path=path)
+                        content_hash = digest(data)
+                        entry = index_entry(data)
+                        graph[path.stem] = Revision(path.stem, tuple(parents), envelope["writer"], content_hash, path=path,
+                                                    entry=entry, request_count=len(data["requests"]))
+                        if cache is not None and before is not None:
+                            cache.save(path, "revision", before, raw_hash, {"revision": path.stem, "parents": parents,
+                                       "writer": envelope["writer"], "content_hash": content_hash, "entry": entry, "requests": len(data["requests"])})
+                        del envelope, data
                         file_checked()
                     for revision in graph.values():
                         missing = set(revision.parents) - graph.keys()
@@ -116,10 +140,11 @@ class Store:
             raise SyncError(f"Divergent history for {identifier}; use conflicts, export-revision, then resolve. No version was overwritten.")
         return heads[0]
 
-    def publish(self, data: dict[str, Any], parents: list[str], writer: str, dry_run: bool = False) -> Revision:
+    def publish(self, data: dict[str, Any], parents: list[str], writer: str, dry_run: bool = False,
+                *, retain_data: bool = True, content_hash: str | None = None) -> Revision:
         identifier = session_id(data["sessionId"])
         session_id(writer)
-        data = normalize(data, identifier)
+        data = normalize(data, identifier, copy_requests=retain_data)
         graph = self.graphs.get(identifier, {})
         if set(parents) - graph.keys():
             raise SyncError(f"The last synced revision is not downloaded for {identifier}; wait for OneDrive")
@@ -133,7 +158,16 @@ class Store:
                 raise SyncError(f"Refusing to replace a non-identical immutable revision: {path}")
         elif not dry_run:
             atomic_write_chunks(path, canonical_chunks(envelope, newline=True))
-        revision = Revision(revision_id, tuple(envelope["parents"]), writer, digest(data), data=data)
+        content_hash = content_hash or digest(data)
+        entry = index_entry(data)
+        revision = Revision(revision_id, tuple(envelope["parents"]), writer, content_hash,
+                            data=data if retain_data else None, path=path if not dry_run else None, entry=entry,
+                            request_count=len(data["requests"]))
+        cache = current.get()
+        if cache is not None and not dry_run:
+            before, raw_hash, _ = cache.lookup(path, "revision")
+            cache.save(path, "revision", before, raw_hash, {"revision": revision_id, "parents": envelope["parents"],
+                       "writer": writer, "content_hash": content_hash, "entry": entry, "requests": len(data["requests"])})
         self.graphs.setdefault(identifier, {})[revision_id] = revision
         return revision
 

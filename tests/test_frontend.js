@@ -101,7 +101,8 @@ async function main() {
     assert.strictEqual(h.run("escapeHtml('<script>\"&')"), "&lt;script&gt;&quot;&amp;");
     assert(h.run("friendlyError(new Error('JSONL record at line 1 exceeds 128 MiB'))").includes("没有截断或删除"));
     assert(h.run("friendlyError(new Error('JSON record exceeds 2 GiB'))").includes("2 GiB"));
-    assert(h.run("friendlyError(new Error('Insufficient memory for this conversation'))").includes("更多内存"));
+    assert(h.run("friendlyError(new Error('Insufficient memory for this conversation'))").includes("内存保护"));
+    assert(h.run("friendlyError(new Error('Insufficient memory: process RSS 2050 MiB, safety threshold 2048 MiB, system available 8192 MiB'))").includes("系统仍可用 8192 MiB"));
     assert(h.run("friendlyError(new Error('File exceeds 8589934592 bytes'))").includes("8 GiB"));
     assert.strictEqual(h.run("blockedReason(snapshot)"), "");
     h.context.snapshot.workspaces.push({ ...project, id: "two" });

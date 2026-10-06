@@ -1,9 +1,29 @@
-# v0.1.6 Check and Transfer Progress Preview
+# v0.1.7 Lower-Memory Incremental Checks Preview
 
 Windows x64 preview of Copilot Chat Sync, an unofficial tool for legacy
 VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Changes
+
+- Process native chats individually; shared publication no longer retains every
+  new transcript in the revision graph. Normalize owned input without unnecessary
+  deep copies while retaining the public normalization function's copy semantics.
+- Plan received payloads as checksummed temporary disk files, not a list of large
+  in-memory documents. Original-file checks, full backup, SQLite compare-and-swap
+  and rollback remain. Corrupted staging files cannot replace the original chat.
+- Cache only validated hashes and small index metadata locally. A cache hit
+  requires a **fresh full-file SHA256**, never just size or timestamps. Unchanged
+  receive skips transcript replay/JSON parsing; one changed chat only requires
+  expensive work for changed content. Missing parents and conflicts still block.
+- Reuse content hashes within each chat operation, release historical payloads
+  before reading the next revision, and build indexes from compact metadata.
+- Memory errors show actual process RSS, protection threshold and available system
+  RAM. The 2 GiB process protection remains; this is not a cure for a single
+  decoded conversation that itself exceeds the resource budget.
+- No new buttons, dependencies or shared-store format. Existing stores remain
+  compatible. Keep the local cache private; it is disposable, unlike sync state.
+
+## Retained Features
 
 - Adds a progress bar to the check and apply dialogs. Shows the current processing
   stage, file name, actual bytes read/written, verified shared revision count and
@@ -14,7 +34,8 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
   operation lock. Each request has its own progress ID; failed/completed requests
   stop polling and old request results cannot replace a new dialog's progress.
 - No new daily controls or runtime dependencies. Existing safety checks remain.
-  This release provides visibility, not a full-history scanning speed improvement.
+  Full raw-byte integrity scans remain; the optimization skips repeated decoding
+  and canonicalization, not integrity protection or OneDrive delivery checks.
 - Retains the v0.1.5 fix for `JSONL record at line 1 exceeds 128 MiB`: initial records use an
   incremental JSON parser, including giant individual strings. The limit is
   consistent across native JSON, records, live state, shared revisions and
@@ -40,10 +61,10 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Downloads
 
-- `CopilotChatSync-0.1.6-windows-x64-Setup.exe`: installer; no Python required.
-- `CopilotChatSync-0.1.6-windows-x64-portable.zip`: extract the entire folder and
+- `CopilotChatSync-0.1.7-windows-x64-Setup.exe`: installer; no Python required.
+- `CopilotChatSync-0.1.7-windows-x64-portable.zip`: extract the entire folder and
   open `CopilotChatSync.exe`. Keep all files together.
-- `CopilotChatSync-0.1.6-desktop.png`: actual Windows CI screenshot with synthetic data.
+- `CopilotChatSync-0.1.7-desktop.png`: actual Windows CI screenshot with synthetic data.
 - `SHA256SUMS.txt`: download integrity checksums.
 
 **Upgrade:** close the app, then run the new Setup into the same directory.
@@ -52,6 +73,26 @@ stores, local configuration and backups are retained. Extract portable updates
 into a new folder to avoid leftover old runtime files.
 
 ## Validation and Limits
+
+Same local 4 x 65 MiB synthetic workload, v0.1.6 vs v0.1.7:
+
+| Operation | Before | After | Peak RSS before / after |
+| --- | --- | --- | --- |
+| First receive/apply | 10.30 s | 8.98 s | 352.9 / 161.7 MiB |
+| Unchanged receive | 11.39 s | 0.47 s | 613.9 / 30.7 MiB |
+| Send one changed chat | 9.22 s | 2.54 s | 353.7 / 161.7 MiB |
+| Receive one changed chat | 14.01 s | 3.00 s | 615.6 / 161.7 MiB |
+
+Unchanged receive parses zero transcript payloads instead of 12; receiving one
+changed chat parses two instead of 13. First sends are not faster in this test
+(8.19 s before, 8.61 s after); cold validation and serialization still cost time.
+Four >129 MiB chats also passed at <290 MiB peak RSS, with unchanged receive
+at 0.92 s / 30.6 MiB. These are local synthetic measurements, not guarantees.
+CI gates zero unchanged parsing, changed-chat parsing counts and multi-chat RSS.
+Tests also preserve checksum failures with unchanged size/mtime, native dirty
+destination protection, cache integrity errors, staging corruption rollback
+and exact raw backups/restoration. A retained >513 MiB first record passed the
+full handoff at 1056.5 MiB RSS; the cumulative >513 MiB log passed at 31.9 MiB.
 
 Progress checks cover real byte counts, concurrent polling while a preview is
 blocked, authentication, request isolation, failure cleanup, determinate and

@@ -1,5 +1,34 @@
 # Release Reviews
 
+## v0.1.7 Incremental Checks and Bounded Multi-Chat Memory
+
+The v0.1.6 workload loaded all native chats and incoming snapshots simultaneously,
+replayed unchanged logs, deep-copied owned requests, and repeatedly canonicalized
+historical revisions. Four 65 MiB chats required 613.9 MiB RSS and 11.39 seconds
+for an unchanged receive; one changed receive parsed 13 payloads (845 MiB).
+
+v0.1.7 processes chats sequentially, stores import plans as checksummed temporary
+files, retains only metadata in sync-owned revision graphs, and separates index
+metadata from transcripts. A local SQLite cache reuses validated metadata only
+after full raw SHA256 verification. It does not trust file size/mtime, skip
+checksums, change the shared format, or delete old versions. Public normalization
+copy semantics remain; owned parsing and validation avoid redundant deep copies.
+
+The identical workload now completes unchanged receive with zero payload parsing
+in 0.47 seconds at 30.7 MiB RSS. One changed receive parses two payloads (130 MiB)
+in 3.00 seconds at 161.7 MiB. First-send time did not improve (8.19 to 8.61 seconds).
+Four >129 MiB chats pass at <290 MiB peak RSS; these local measurements do not
+guarantee user-file or Windows/cloud performance. CI asserts unchanged and
+one-changed parsing counts plus a single-chat-scaled RSS ceiling.
+
+Regression tests verify preserved-size/mtime corruption is rejected, dirty native
+changes remain protected, damaged metadata cache fails explicitly and corrupted
+staging triggers rollback. Staging is checksummed again before destination
+replacement; cache seeding verifies the emitted file's expected checksum.
+Progress, full raw backup/recovery, process locks, editor-state quarantine and
+SQLite compare-and-swap remain. Single decoded models can still exceed the memory
+budget; errors now disclose actual RSS, threshold and system available RAM.
+
 ## v0.1.6 Visible Check and Transfer Progress
 
 Check/apply dialogs now use native HTML progress bars and an authenticated,

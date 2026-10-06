@@ -23,6 +23,7 @@ from typing import Iterator
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from .cache import cache_scope
 from .progress import Progress, report
 from .safety import code_processes, is_redirect
 from .sessions import SyncError, canonical_bytes, native_bytes, normalize, session_id
@@ -113,7 +114,12 @@ class Panel:
 
     def _dispatch(self, arguments: list[str]) -> dict:
         from .cli import dispatch, parser
-        return dispatch(parser().parse_args(["--config", str(self.config_path), *arguments]))
+        args = parser().parse_args(["--config", str(self.config_path), *arguments])
+        if self.config_path.exists():
+            Config.load(self.config_path)
+            with cache_scope(self.config_path.with_suffix(".cache.sqlite")):
+                return dispatch(args)
+        return dispatch(args)
 
     def _execute(self, options: dict, apply: bool) -> dict:
         action = options["action"]
@@ -181,7 +187,7 @@ class Panel:
                 raise PanelError("Preview input exceeds 100,000 files; use the CLI for this group")
             try:
                 info = path.lstat()
-                record = (str(path), info.st_size, info.st_mtime_ns, info.st_ino, info.st_mode)
+                record = (str(path), info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_mode)
             except FileNotFoundError:
                 record = (str(path), None)
             digest.update(canonical_bytes(record))
@@ -303,10 +309,11 @@ class Panel:
         if not REVISION_ID.fullmatch(revision_id):
             raise PanelError("Invalid revision ID")
         config = Config.load(self.config_path)
-        revision = Store(config.store).load().graphs.get(identifier, {}).get(revision_id)
-        if revision is None:
-            raise PanelError("Revision not found", 404)
-        data = revision.session
+        with cache_scope(self.config_path.with_suffix(".cache.sqlite")):
+            revision = Store(config.store).load().graphs.get(identifier, {}).get(revision_id)
+            if revision is None:
+                raise PanelError("Revision not found", 404)
+            data = revision.session
         truncated = len(data["requests"]) > 100
 
         def parts(value: object) -> Iterator[str]:

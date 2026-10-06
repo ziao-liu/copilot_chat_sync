@@ -11,7 +11,7 @@ from typing import Any, Iterator
 
 from .index import backup_database, read_keys, write_keys
 from .safety import atomic_copy, atomic_write, atomic_write_chunks, is_redirect, plain_path
-from .sessions import SyncError, canonical_bytes, canonical_chunks, chunks_digest, file_digest, json_loads, read_stable, session_id
+from .sessions import SyncError, canonical_bytes, canonical_chunks, chunks_digest, file_chunks, file_digest, json_loads, read_stable, session_id
 from .workspace import Config, Workspace, workspace_id
 
 BACKUP_ID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{8}\Z")
@@ -28,10 +28,13 @@ def new_backup_id() -> str:
 @dataclass
 class FileUpdate:
     path: Path
-    data: bytes | dict[str, Any]
+    data: bytes | dict[str, Any] | Path
     before_hash: str | None
+    after_hash: str | None = None
 
     def chunks(self) -> Iterator[bytes]:
+        if isinstance(self.data, Path):
+            return file_chunks(self.data)
         return iter([self.data]) if isinstance(self.data, bytes) else canonical_chunks(self.data, newline=True)
 
 
@@ -102,7 +105,7 @@ def apply_updates(config: Config, updates: list[WorkspaceUpdate]) -> str | None:
             if file.before_hash is not None:
                 atomic_copy(file.path, directory / "files" / relative, file.before_hash)
             journal["files"].append({"path": relative, "before": file.before_hash,
-                                     "after": chunks_digest(file.chunks())})
+                                     "after": file.after_hash or chunks_digest(file.chunks())})
         if update.before != update.after:
             backup_database(workspace.database, directory / "databases" / (workspace.identifier + ".sqlite"))
             journal["databases"].append({"workspace": workspace.identifier, "before": update.before, "after": update.after})
@@ -124,7 +127,10 @@ def apply_updates(config: Config, updates: list[WorkspaceUpdate]) -> str | None:
             for file in update.files:
                 if fingerprint(file.path) != file.before_hash:
                     raise SyncError(f"Session changed during apply: {file.path}")
-                atomic_write_chunks(file.path, file.chunks())
+                if isinstance(file.data, Path) and file.after_hash is not None:
+                    atomic_copy(file.data, file.path, file.after_hash)
+                else:
+                    atomic_write_chunks(file.path, file.chunks())
             if update.before != update.after:
                 write_keys(update.workspace.database, update.before, update.after)
         journal["status"] = "complete"

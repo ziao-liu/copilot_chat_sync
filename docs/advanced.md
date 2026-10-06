@@ -244,7 +244,16 @@ errors go to stderr. Exit codes: `0` success/preview, `2` validation/safety/I/O 
   default `chat.useLogSessionStorage` setting for new imports. JSONL takes precedence
   when both formats exist.
 - Shared format is version 1, using immutable, checksummed full snapshots. No garbage
-  collector exists. Historical payloads load lazily but verification reads all revisions.
+  collector exists. Historical payloads load lazily. Each operation still reads
+  all revision bytes for full raw checksums, but unchanged files reuse validated
+  metadata instead of parsing and canonicalizing every old snapshot again.
+  The local, disposable `<config-stem>.cache.sqlite` stores checksummed metadata
+  only and can be rebuilt; it is separate from authoritative sync state/backups.
+  Size/mtime alone never authorize a cache hit. CLI previews use an in-memory
+  cache copy; the panel may update only its local performance cache during checks.
+  Imports are checksummed temporary disk files, planned before any native writes,
+  and removed on completion/failure. Chats are processed individually instead of
+  retaining all native/shared payloads. Temporary disk space must be sufficient.
   Oversized/truncated files fail explicitly. Native JSONL logs are replayed
   incrementally, including giant initial records, with an 8 GiB total-log limit.
   Records, replayed state, plain JSON, compact imports and shared revisions have
@@ -254,6 +263,8 @@ errors go to stderr. Exit codes: `0` success/preview, `2` validation/safety/I/O 
   These are soft checks, not an OS-enforced bound; a large token/object can allocate
   between checks. JSON nesting is limited to 256 levels. Low-memory computers
   may reject files below the size ceiling. Sending leaves the original log unchanged.
+  Memory errors now report process RSS, the protection threshold and system
+  available memory, rather than assuming other applications exhausted the RAM.
   Raw backup, restore, hashing and migration stream 1 MiB chunks, with full
   checksums and changed-source detection before replacement.
 - Deletions do not propagate. A later receive can restore a locally deleted chat.
@@ -286,6 +297,7 @@ python tests/check_large_log.py
 python tests/check_large_snapshot.py
 python tests/check_large_snapshot.py --mib 513 --shrink
 python tests/check_large_snapshot.py --mib 513
+python tests/check_efficiency.py --mib 129 --assert-optimized
 python -m pip wheel --no-deps --wheel-dir dist .
 ```
 
@@ -297,6 +309,10 @@ raw backup/restore and unchanged sends; temporary fixtures are cleaned automatic
 CI runs all four checks on Linux/Python 3.12. Windows packaging also verifies
 a >129 MiB first record using the actual executable and reinstalls into the same
 directory, checking stale program replacement and preservation of config/backups.
+The efficiency gate uses four >129 MiB chats: unchanged receive must parse zero
+JSON payloads, a one-chat change parses at most two incoming payloads, and sampled
+RSS must stay below a single-chat-scaled ceiling rather than scale with chat count.
+Use `--report path.json` to record timings, RSS and parsed bytes for comparisons.
 
 Tests use temporary native SQLite/chat fixtures. CI targets Linux, Windows and macOS;
 Windows-only tests cover NTFS junctions and the PowerShell launcher. A configured

@@ -159,7 +159,8 @@ function friendlyError(error) {
         return "单条操作或重放后的聊天快照超过 2 GiB，无法安全同步。记录没有截断或删除，请查看技术信息。";
     }
     if (/Insufficient memory|MemoryError/.test(message)) {
-        return "这段聊天需要更多内存。请关闭其他应用后重试，或在内存更大的电脑上同步。原始记录没有截断或删除。";
+        const memory = message.match(/process RSS (\d+) MiB, safety threshold (\d+) MiB, system available (\d+) MiB/);
+        return `同步进程触发内存保护${memory ? `：占用 ${memory[1]} MiB，保护阈值 ${memory[2]} MiB，系统仍可用 ${memory[3]} MiB` : ""}。这不一定表示系统内存已用尽。原始记录没有截断或删除，请查看技术信息。`;
     }
     if (/File exceeds 8589934592|JSONL log exceeds/.test(message)) return "聊天日志超过 8 GiB 安全上限，暂不支持同步。原文件未删除或截断。";
     if (message.includes("Unpublished local changes")) return "本机有未发送的修改。请先发送，再接收。";

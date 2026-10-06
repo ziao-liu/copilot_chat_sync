@@ -8,15 +8,15 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-Version 0.1.6 adds visible check/transfer progress to the compact Chinese-language
-interface, retaining expandable project folders and large-snapshot support.
+Version 0.1.7 reduces repeated parsing and multi-chat memory use, retaining
+visible progress, the compact interface and large-snapshot support.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.6)
-  and download `CopilotChatSync-0.1.6-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.7)
+  and download `CopilotChatSync-0.1.7-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -73,12 +73,14 @@ checks, without additional confirmation dialogs. Conflicts and editing-checkpoin
 quarantine still require explicit choices. The main page shows total chat counts,
 not pending transfer counts, and the most recent operation in this app session.
 Send/Receive works on the local sync folder; success does not confirm cloud delivery.
-Version 0.1.6 shows a progress bar during checks and writes with actual read
+A progress bar during checks and writes shows actual read
 bytes, processing stage, elapsed time and number of verified shared revisions.
 It is **not an overall percentage**: hashing/serialization and writes without a
 known total use an indeterminate bar. Progress is local, not OneDrive upload status.
-This release makes long checks visible; it does not eliminate full-history checks
-or promise faster transfers.
+Verified local metadata avoids parsing unchanged history and native logs again.
+Every reuse still checks the complete file checksum, not just size/timestamps.
+Chats are processed individually and imports staged on disk; the first cold check
+and genuinely changed large chats can still take minutes.
 Conflicting versions are kept for review, not silently overwritten or combined.
 Backups are automatic; restore and diagnostics live under **设置**. Old-link migration
 appears only when the selected project needs it. Index repair is offered only when
@@ -112,6 +114,16 @@ these checks, so file-size support is not a guarantee on every computer.
 Capacity failures are explicit and never truncate chats. Large-log replay may
 take minutes; keep VS Code closed throughout. Conflict previews show at most
 100 turns and 4000 characters per message/reply, without shortening synced data.
+
+v0.1.7 no longer keeps all workspace chats/import payloads in memory together.
+On a local 4 x 65 MiB synthetic workload, unchanged receive improved from
+11.39 s / 613.9 MiB peak RSS to 0.47 s / 30.7 MiB; receiving one changed chat
+improved from 14.01 s / 615.6 MiB to 3.00 s / 161.7 MiB. First sends were not
+faster in this test. Results are illustrative, not a guarantee on your computer.
+The disposable `config.cache.sqlite` beside the local configuration stores only
+verified hashes/index metadata, not transcripts. Keep it local and private.
+Delete only that cache if a cache integrity error explicitly requests it; never
+delete the sync state, shared revisions or backups to reset performance.
 
 ## More
 

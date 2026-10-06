@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from copilot_chat_sync.index import INDEX, read_keys
+from copilot_chat_sync.transaction import apply_updates
 from copilot_chat_sync.sessions import SyncError, canonical_bytes, file_digest, load_session, native_bytes, normalize
 from copilot_chat_sync.store import Store
 from copilot_chat_sync.sync import migrate, pull, push, repair, resolve, restore
@@ -64,6 +65,36 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.text(0), "continued on B")
         self.assertIn(SID, json.loads(read_keys(self.workspaces[0].database)[INDEX])["entries"])
         self.assertEqual(self.code.read_text(), "original project code\n")
+
+    def test_unchanged_receive_reuses_only_checksum_verified_metadata(self):
+        self.seed_both()
+        with patch("copilot_chat_sync.sessions._read_json", side_effect=AssertionError("Unchanged chat parsed")):
+            self.assertEqual(pull(self.configs[1], apply=True)["files"], 0)
+        path = self.workspaces[1].chats / (SID + ".jsonl")
+        before = path.stat()
+        path.write_bytes(path.read_bytes().replace(b"original", b"modified"))
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        with self.assertRaisesRegex(SyncError, "Unpublished local changes"):
+            pull(self.configs[1], apply=True)
+        self.assertEqual(self.text(1), "modified")
+
+    def test_corrupted_disk_stage_rolls_back_without_replacing_original_chat(self):
+        self.seed_both()
+        self.write(0, "new shared")
+        push(self.configs[0], apply=True)
+        before = read_keys(self.workspaces[1].database)
+
+        def corrupt(config, updates):
+            stage = updates[0].files[0].data
+            self.assertIsInstance(stage, Path)
+            stage.write_bytes(b"corrupted stage")
+            return apply_updates(config, updates)
+
+        with patch("copilot_chat_sync.sync.apply_updates", side_effect=corrupt):
+            with self.assertRaisesRegex(SyncError, "rolled back"):
+                pull(self.configs[1], apply=True)
+        self.assertEqual(self.text(1), "original")
+        self.assertEqual(read_keys(self.workspaces[1].database), before)
 
     def test_dry_run_does_not_touch_native_or_shared_data(self):
         before = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))

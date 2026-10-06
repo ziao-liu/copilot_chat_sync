@@ -10,9 +10,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from . import __version__
+from .cache import cache_scope
 from .index import INDEX, merge_keys, read_keys
 from .safety import code_processes, is_redirect
-from .sessions import SyncError, canonical_chunks, json_loads, metadata
+from .sessions import SyncError, canonical_chunks, json_loads
 from .store import Store
 from .sync import migrate, operation, pull, push, repair, resolve, restore
 from .transaction import list_backups
@@ -135,6 +136,14 @@ def _status(config: Config, doctor: bool) -> dict:
 
 
 def dispatch(args: argparse.Namespace) -> dict:
+    if args.command in ("init", "scan", "panel"):
+        return _dispatch(args)
+    config = Config.load(args.config)
+    with cache_scope(config.path.with_suffix(".cache.sqlite"), persist=bool(getattr(args, "apply", False))):
+        return _dispatch(args)
+
+
+def _dispatch(args: argparse.Namespace) -> dict:
     if args.command == "scan":
         storage = args.storage_root
         if storage is None:
@@ -198,9 +207,10 @@ def dispatch(args: argparse.Namespace) -> dict:
         for identifier, heads in store.conflicts().items():
             summaries = []
             for head in heads:
-                data = head.session
-                summaries.append({"revision": head.revision, "writer": head.writer, "requests": len(data["requests"]),
-                                  "last_message_date": metadata(data)["lastMessageDate"]})
+                if head.entry is None:
+                    raise SyncError("Shared revision has no validated index metadata")
+                summaries.append({"revision": head.revision, "writer": head.writer, "requests": head.request_count,
+                                  "last_message_date": head.entry["lastMessageDate"]})
             conflicts.append({"session": identifier, "heads": summaries})
         return {"conflicts": conflicts}
     if args.command == "resolve":

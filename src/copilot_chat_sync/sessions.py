@@ -62,7 +62,7 @@ class MemoryGuard:
         if not force and self.calls % 256:
             return
         if self.process.memory_info().rss > self.limit:
-            raise SyncError("Insufficient memory for this conversation; close other applications and retry on a computer with more RAM. No chat was truncated.")
+            raise SyncError(f"Insufficient memory for this conversation: process RSS {self.process.memory_info().rss / 2**20:.0f} MiB, safety threshold {self.limit / 2**20:.0f} MiB, system available {psutil.virtual_memory().available / 2**20:.0f} MiB. No chat was truncated.")
 
 
 def _canonical_parts(value: Any, depth: int = 0) -> Iterator[str]:
@@ -396,7 +396,7 @@ def parse_log(text: str | Iterable[str]) -> dict[str, Any]:
     return _replay(entries(), _json_size)
 
 
-def normalize(data: Any, expected_id: str) -> dict[str, Any]:
+def normalize(data: Any, expected_id: str, *, copy_requests: bool = True) -> dict[str, Any]:
     session_id(expected_id)
     if not isinstance(data, dict) or not isinstance(data.get("requests"), list):
         raise SyncError("Not a native Copilot session (expected an object with requests)")
@@ -419,7 +419,7 @@ def normalize(data: Any, expected_id: str) -> dict[str, Any]:
         "creationDate": created,
         "initialLocation": "panel",
         "responderUsername": data.get("responderUsername", "GitHub Copilot"),
-        "requests": copy.deepcopy(data["requests"]),
+        "requests": copy.deepcopy(data["requests"]) if copy_requests else data["requests"],
     }
     title = data.get("customTitle", data.get("computedTitle"))
     if isinstance(title, str) and title:
@@ -436,7 +436,7 @@ def load_session(path: Path) -> dict[str, Any]:
                 data = _replay(_log_entries(stream), _json_size)
         else:
             data = load_json(path)
-        return normalize(data, path.stem)
+        return normalize(data, path.stem, copy_requests=False)
     except MemoryError as error:
         raise SyncError(f"Cannot read session {path}: Insufficient memory; no chat was truncated") from error
     except (OSError, UnicodeError, ValueError, ijson.JSONError, SyncError) as error:
@@ -473,7 +473,7 @@ def metadata(data: dict[str, Any]) -> dict[str, Any]:
         timestamp = created
     return {
         "sessionId": data["sessionId"],
-        "title": (title.splitlines()[0][:200] if title.strip() else "New Chat"),
+        "title": (title[:200].splitlines()[0] if re.search(r"\S", title) else "New Chat"),
         "lastMessageDate": timestamp,
         "timing": {"created": created, "lastRequestStarted": timestamp, "lastRequestEnded": timestamp},
         "initialLocation": "panel",

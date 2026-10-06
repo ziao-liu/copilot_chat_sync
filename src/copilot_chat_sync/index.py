@@ -76,6 +76,19 @@ def write_keys(path: Path, expected: dict[str, str | None], replacement: dict[st
 
 
 def merge_keys(before: dict[str, str | None], sessions: dict[str, dict[str, Any]]) -> dict[str, str | None]:
+    return merge_entries(before, {identifier: index_entry(data) for identifier, data in sessions.items()})
+
+
+def index_entry(data: dict[str, Any]) -> dict[str, Any]:
+    entry = metadata(data)
+    last_state = data["requests"][-1].get("modelState", {}) if data["requests"] else {}
+    response_state = last_state.get("value", 1) if isinstance(last_state, dict) else 1
+    entry["lastResponseState"] = response_state if response_state in (1, 2, 3) else 2
+    entry["isImported"] = False
+    return entry
+
+
+def merge_entries(before: dict[str, str | None], entries: dict[str, dict[str, Any]]) -> dict[str, str | None]:
     try:
         index = json_loads(before[INDEX]) if before[INDEX] is not None else {"version": 1, "entries": {}}
         model = json_loads(before[MODEL_CACHE]) if before[MODEL_CACHE] is not None else []
@@ -90,12 +103,7 @@ def merge_keys(before: dict[str, str | None], sessions: dict[str, dict[str, Any]
         if not isinstance(cache, list) or any(not isinstance(entry, dict) or not isinstance(entry.get("resource"), str) for entry in cache):
             raise SyncError("Unsupported agent cache schema; refusing to rewrite it")
     index, model, state = copy.deepcopy(index), copy.deepcopy(model), copy.deepcopy(state)
-    for identifier, data in sessions.items():
-        entry = metadata(data)
-        last_state = data["requests"][-1].get("modelState", {}) if data["requests"] else {}
-        response_state = last_state.get("value", 1) if isinstance(last_state, dict) else 1
-        entry["lastResponseState"] = response_state if response_state in (1, 2, 3) else 2
-        entry["isImported"] = False
+    for identifier, entry in entries.items():
         index["entries"][identifier] = {**index["entries"].get(identifier, {}), **entry}
         resource = "vscode-chat-session://local/" + base64.urlsafe_b64encode(identifier.encode()).decode().rstrip("=")
         previous_model = next((item for item in model if item["resource"] == resource), {})

@@ -37,6 +37,9 @@ jobs:
           python tests/check_large_snapshot.py
           python tests/check_large_snapshot.py --mib 513 --shrink
           python tests/check_large_snapshot.py --mib 513
+      - name: Gate multi-chat memory and incremental parsing
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: python tests/check_efficiency.py --mib 129 --assert-optimized
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
