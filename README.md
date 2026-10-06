@@ -8,15 +8,16 @@ synced folder. A Windows desktop app handles setup, transfers, conflicts and bac
 > Early preview, unofficial. Real Windows/OneDrive handoff
 > and native Copilot continuation still need a pilot. Not for Agent Host or CLI sessions.
 
-Version 0.1.7 reduces repeated parsing and multi-chat memory use, retaining
-visible progress, the compact interface and large-snapshot support.
+Version 0.1.8 adds overall progress from startup through handoff completion and
+removes redundant startup scans, retaining the lower-memory checks, compact
+interface and large-snapshot support.
 
 ## Start
 
 **Windows 10/11 x64: no Python installation required.**
 
-1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.7)
-  and download `CopilotChatSync-0.1.7-windows-x64-Setup.exe`.
+1. Open [Releases](https://github.com/ziao-liu/copilot_chat_sync/releases/tag/v0.1.8)
+  and download `CopilotChatSync-0.1.8-windows-x64-Setup.exe`.
 2. Install for your user, then open **Copilot Chat Sync** from the Start menu.
 3. A standalone app window opens. No browser tab or console is needed; closing the app stops its local service.
 
@@ -73,10 +74,16 @@ checks, without additional confirmation dialogs. Conflicts and editing-checkpoin
 quarantine still require explicit choices. The main page shows total chat counts,
 not pending transfer counts, and the most recent operation in this app session.
 Send/Receive works on the local sync folder; success does not confirm cloud delivery.
-A progress bar during checks and writes shows actual read
-bytes, processing stage, elapsed time and number of verified shared revisions.
-It is **not an overall percentage**: hashing/serialization and writes without a
-known total use an indeterminate bar. Progress is local, not OneDrive upload status.
+v0.1.8 uses a left-to-right **overall progress bar**, including
+initial loading and refresh. A handoff keeps one percentage through preflight,
+execution and final refresh; changing files does not reset it. Progress is based
+on completed work steps, subdivided by verified revisions and processed chats,
+not elapsed-time guesses or a prediction of remaining time. File bytes, current
+stage and elapsed time remain in the details. Only a successful final response
+reaches 100%; failed requests retain their partial progress.
+Startup verifies the shared store once, reusing that graph for counts/conflicts,
+instead of scanning it separately for status, totals and conflict summaries.
+Progress is local, not OneDrive upload status.
 Verified local metadata avoids parsing unchanged history and native logs again.
 Every reuse still checks the complete file checksum, not just size/timestamps.
 Chats are processed individually and imports staged on disk; the first cold check

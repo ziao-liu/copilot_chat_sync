@@ -15,7 +15,11 @@
             <div><h1>Copilot 聊天同步</h1><p>换电脑，接着聊。</p></div>
             <button id="settings" type="button" hidden>设置</button>
         </header>
-        <p id="loading" role="status">正在读取本机记录…</p>
+        <section id="loading" aria-label="加载进度">
+            <div class="progress-heading"><span id="startup-stage">正在加载项目与共享记录…</span><strong id="startup-percent">0%</strong></div>
+            <progress id="startup-progress" max="1" value="0" aria-label="整体加载进度"></progress>
+            <p id="startup-detail" class="hint" role="status" aria-live="polite">准备读取…</p>
+        </section>
         <div id="error-banner" class="notice error" role="alert" hidden>
             <span id="error-message"></span>
             <button id="dismiss-error" type="button">收起</button>

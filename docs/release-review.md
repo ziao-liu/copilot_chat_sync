@@ -1,5 +1,31 @@
 # Release Reviews
 
+## v0.1.8 Overall Progress and Single-Pass Startup
+
+The initial "reading local records" screen had no progress reporting. Startup
+also loaded the shared store separately for status, counts and conflicts, with
+one pass outside the verified metadata cache. It now validates the shared graph
+once inside the cache scope and reuses that graph for counts/conflict summaries.
+Regression coverage asserts one store load per state request and no JSON
+reparsing on an unchanged subsequent startup. Fresh full-file checksums remain.
+
+Startup and refresh now use the authenticated request-progress endpoint. Native
+HTML bars explicitly fill left to right. Overall progress is based on completed
+steps, subdivided into verified revisions and processed chats; individual file
+byte counters remain details rather than resetting the bar. One-click transfers
+continue through preflight (0-40%), execution (40-90%) and refresh (90-100%),
+sharing elapsed time. These phase shares are not byte/time proportions or an
+estimated remaining duration. Progress is local, not OneDrive cloud delivery.
+
+Only the final successful response displays 100%. Exceptions retain partial
+progress, clean nested contexts and stop polling; stale request IDs cannot
+replace the active operation. Tests exercise nested work, file transitions,
+empty stores, failures and real first/unchanged send-receive operations. Frontend
+tests verify the complete three-request flow, refresh failures, stale responses
+and the final-response completion boundary. All 114 Python tests pass locally
+(three Windows-only skips), alongside frontend and syntax checks. Existing
+cross-platform, real-size, memory and Windows packaging gates remain required.
+
 ## v0.1.7 Incremental Checks and Bounded Multi-Chat Memory
 
 The v0.1.6 workload loaded all native chats and incoming snapshots simultaneously,

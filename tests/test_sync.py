@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from copilot_chat_sync.index import INDEX, read_keys
+from copilot_chat_sync.progress import Progress
 from copilot_chat_sync.transaction import apply_updates
 from copilot_chat_sync.sessions import SyncError, canonical_bytes, file_digest, load_session, native_bytes, normalize
 from copilot_chat_sync.store import Store
@@ -65,6 +66,29 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.text(0), "continued on B")
         self.assertIn(SID, json.loads(read_keys(self.workspaces[0].database)[INDEX])["entries"])
         self.assertEqual(self.code.read_text(), "original project code\n")
+
+    def test_real_handoff_reports_monotonic_overall_progress(self):
+        class RecordingProgress(Progress):
+            def __init__(self):
+                super().__init__()
+                self.values = []
+
+            def update(self, **values):
+                super().update(**values)
+                self.values.append(self.snapshot("handoff")["overall"])
+
+        for function, config in [(push, self.configs[0]), (pull, self.configs[1]),
+                                 (push, self.configs[0]), (pull, self.configs[1])]:
+            with self.subTest(operation=function.__name__):
+                progress = RecordingProgress()
+                with progress.track("handoff"):
+                    function(config, apply=True)
+                    self.assertLess(progress.snapshot("handoff")["overall"], 1)
+                self.assertEqual(progress.values, sorted(progress.values))
+                self.assertTrue(any(0 < value < 1 for value in progress.values))
+                self.assertTrue(all(value < 1 for value in progress.values))
+                self.assertEqual(progress.snapshot("handoff")["overall"], 1)
+                self.assertEqual(progress.steps, [])
 
     def test_unchanged_receive_reuses_only_checksum_verified_metadata(self):
         self.seed_both()

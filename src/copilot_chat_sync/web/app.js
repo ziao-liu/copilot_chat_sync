@@ -8,26 +8,33 @@ let planTimer;
 let progressSequence = 0;
 
 function progressBody() {
-    return '<progress id="operation-progress" aria-label="当前文件读取进度"></progress><p id="progress-detail" role="status" aria-live="polite">准备检查…</p><p class="hint">百分比仅表示当前文件读取进度，不是整个操作进度。校验阶段没有固定百分比；请勿启动 VS Code 或关闭应用。</p>';
+    return '<div class="progress-heading"><span id="progress-stage">准备检查…</span><strong id="progress-percent">0%</strong></div><progress id="operation-progress" max="1" value="0" aria-label="整体任务进度"></progress><p id="progress-detail" class="hint" role="status" aria-live="polite"></p><p class="hint">请勿启动 VS Code 或关闭应用。此进度不包括 OneDrive 云端传输。</p>';
 }
 
-function renderProgress(progress, seconds) {
-    const bar = byId("operation-progress");
-    const detail = byId("progress-detail");
+function renderProgress(progress, seconds, { target = "operation", start = 0, end = 1 } = {}) {
+    const bar = byId(target === "operation" ? "operation-progress" : "startup-progress");
+    const detail = byId(target === "operation" ? "progress-detail" : "startup-detail");
     if (!bar || !detail) return;
-    if (progress.total > 0) {
-        bar.max = progress.total;
-        bar.value = Math.min(progress.done, progress.total);
-    } else {
-        bar.removeAttribute("value");
-    }
+    const fraction = Number.isFinite(progress.overall) ? Math.max(0, Math.min(1, progress.overall)) : 0;
+    bar.max = 1;
+    bar.value = Math.max(Number(bar.value) || 0, start + (end - start) * fraction);
+    const percentage = `${Math.floor(bar.value * 100)}%`;
+    const stage = byId(target === "operation" ? "progress-stage" : "startup-stage");
+    const percent = byId(target === "operation" ? "progress-percent" : "startup-percent");
+    if (stage) stage.textContent = progress.stage || "准备检查…";
+    if (percent) percent.textContent = percentage;
+    bar.setAttribute("aria-valuetext", `${percentage} · ${progress.stage || "准备检查"}`);
     const size = progress.done > 0 ? ` · ${(progress.done / 1048576).toFixed(1)}${progress.total ? ` / ${(progress.total / 1048576).toFixed(1)}` : ""} MiB` : "";
-    detail.textContent = `${progress.stage || "等待检查开始"}${progress.file ? ` · ${progress.file}` : ""}${size} · 已校验共享版本 ${progress.files || 0} 个 · 已用时 ${seconds} 秒`;
+    detail.textContent = `${progress.file || ""}${size}${progress.files ? ` · 已校验共享版本 ${progress.files} 个` : ""} · 已用时 ${seconds} 秒`;
 }
 
-async function progressApi(path, data) {
+async function progressApi(path, data, options = {}) {
+    const { target = "operation", start = 0, stage = "准备检查…" } = options;
+    const bar = byId(target === "operation" ? "operation-progress" : "startup-progress");
+    if (bar && start === 0) bar.value = 0;
     const identifier = `${Date.now()}-${++progressSequence}`;
-    const started = Date.now();
+    const started = options.started ?? Date.now();
+    renderProgress({ overall: 0, stage }, Math.floor((Date.now() - started) / 1000), options);
     let polling = false;
     let stopped = false;
     const timer = setInterval(async () => {
@@ -35,15 +42,28 @@ async function progressApi(path, data) {
         polling = true;
         try {
             const progress = await api(`/api/progress?${identifier}`);
-            if (!stopped) renderProgress(progress, Math.floor((Date.now() - started) / 1000));
+            if (!stopped && progress.id === identifier) {
+                renderProgress({ ...progress, overall: Math.min(progress.overall, .999) },
+                    Math.floor((Date.now() - started) / 1000), options);
+            }
         } catch (error) {
-            if (!stopped && byId("progress-detail")) byId("progress-detail").textContent = `进度暂时不可用：${friendlyError(error)}。操作请求仍在等待结果，请勿重复执行。`;
+            const detail = byId(target === "operation" ? "progress-detail" : "startup-detail");
+            if (!stopped && detail) detail.textContent = `进度暂时不可用：${friendlyError(error)}。请求仍在等待结果，请勿重复执行。`;
         } finally {
             polling = false;
         }
     }, 750);
     try {
-        return await api(`${path}?${identifier}`, data);
+        const result = await api(`${path}?${identifier}`, data);
+        renderProgress({ overall: 1, stage: (options.end ?? 1) === 1 ? "已完成" : "此阶段已完成" },
+            Math.floor((Date.now() - started) / 1000), options);
+        return result;
+    } catch (error) {
+        const heading = byId(target === "operation" ? "progress-stage" : "startup-stage");
+        const detail = byId(target === "operation" ? "progress-detail" : "startup-detail");
+        if (heading) heading.textContent = `${stage}未完成`;
+        if (detail) detail.textContent = friendlyError(error);
+        throw error;
     } finally {
         stopped = true;
         clearInterval(timer);
@@ -230,8 +250,14 @@ function updateButtons() {
     byId("migrate").disabled = state.busy || !snapshot?.process_check_ok || Boolean(snapshot?.code_processes.length);
 }
 
-async function loadState() {
-    const snapshot = await api("/api/state");
+async function loadState(options = { target: "startup", stage: "加载项目与共享记录" }) {
+    byId("loading").hidden = options.target !== "startup";
+    let snapshot;
+    try {
+        snapshot = await progressApi("/api/state", undefined, options);
+    } finally {
+        byId("loading").hidden = true;
+    }
     state.snapshot = snapshot;
     byId("access").hidden = true;
     byId("content").hidden = false;
@@ -338,13 +364,13 @@ function scanSetup() {
     });
 }
 
-async function applyTicket(plan, acknowledge = false) {
+async function applyTicket(plan, acknowledge = false, started = Date.now()) {
     clearInterval(planTimer);
     state.preview = null;
     dialog("正在处理", progressBody(), []);
-    const result = await progressApi("/api/apply", { plan: plan.plan, acknowledge });
-    byId("progress-detail").textContent = "操作已完成，正在刷新聊天状态…";
-    await loadState();
+    const result = await progressApi("/api/apply", { plan: plan.plan, acknowledge },
+        { start: .4, end: .9, stage: "执行同步", started });
+    await loadState({ target: "operation", start: .9, stage: "刷新聊天状态", started });
     byId("modal").close();
     if (result.conflicts?.length) showConflicts();
 }
@@ -370,9 +396,10 @@ function planBody(plan, options) {
 
 function preview(options) {
     return task(async () => {
+        const started = Date.now();
         dialog("正在检查", progressBody(), []);
         let plan;
-        try { plan = await progressApi("/api/preview", options); }
+        try { plan = await progressApi("/api/preview", options, { end: .4, stage: "检查同步条件", started }); }
         catch (error) {
             const actions = [{ label: "关闭", run: closeDialog }];
             if (["pull", "repair"].includes(options.action) && !options.detach && error.message.includes("Editing snapshots")) {
@@ -383,7 +410,7 @@ function preview(options) {
             return;
         }
         if (canAutoApply(plan, options, state.snapshot)) {
-            await applyTicket(plan);
+            await applyTicket(plan, false, started);
             return;
         }
         state.preview = { ...plan, options, deadline: Date.now() + plan.expires_in * 1000 };

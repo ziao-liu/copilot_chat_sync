@@ -1,9 +1,26 @@
-# v0.1.7 Lower-Memory Incremental Checks Preview
+# v0.1.8 Overall Progress and Faster Startup Preview
 
 Windows x64 preview of Copilot Chat Sync, an unofficial tool for legacy
 VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Changes
+
+- Show an overall, left-to-right progress bar during initial loading and refresh,
+  replacing the static "reading local records" message. Startup verifies the
+  shared store once instead of separately scanning it for status, counts and
+  conflicts. Unchanged startups reuse verified metadata without JSON reparsing;
+  each cache reuse still verifies the full raw file checksum.
+- Keep one percentage through preflight, execution and final refresh. Progress
+  advances on completed work steps, with revision/chat subdivisions; changing
+  files no longer resets it. Phase shares are not elapsed-time or byte proportions.
+  Current stage, file bytes and elapsed time remain details; no guessed countdown.
+- Display 100% only after the final successful response. Failure preserves
+  partial progress, reports the error and stops polling. Stale request IDs cannot
+  change the active progress; one-click handoffs retain total elapsed time.
+- Existing configurations, shared format, backups, recovery and low-memory
+  behavior remain compatible. No extra daily controls or dependencies.
+
+## Retained v0.1.7 Optimizations
 
 - Process native chats individually; shared publication no longer retains every
   new transcript in the revision graph. Normalize owned input without unnecessary
@@ -25,11 +42,9 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Retained Features
 
-- Adds a progress bar to the check and apply dialogs. Shows the current processing
-  stage, file name, actual bytes read/written, verified shared revision count and
-  elapsed time. The percentage is for the current file's reading pass, **not**
-  the whole operation. Hashing/serialization and writes without a known total
-  use an indeterminate bar; there is no estimated countdown.
+- Check and apply dialogs retain actual file-byte counters, processing stages,
+  verified revision counts and elapsed time beneath the overall bar. The progress
+  concerns local work only; it does not confirm OneDrive cloud delivery.
 - Authenticated progress polling remains responsive while a check holds the
   operation lock. Each request has its own progress ID; failed/completed requests
   stop polling and old request results cannot replace a new dialog's progress.
@@ -61,10 +76,10 @@ VS Code Copilot chat handoffs through OneDrive or another synced folder.
 
 ## Downloads
 
-- `CopilotChatSync-0.1.7-windows-x64-Setup.exe`: installer; no Python required.
-- `CopilotChatSync-0.1.7-windows-x64-portable.zip`: extract the entire folder and
+- `CopilotChatSync-0.1.8-windows-x64-Setup.exe`: installer; no Python required.
+- `CopilotChatSync-0.1.8-windows-x64-portable.zip`: extract the entire folder and
   open `CopilotChatSync.exe`. Keep all files together.
-- `CopilotChatSync-0.1.7-desktop.png`: actual Windows CI screenshot with synthetic data.
+- `CopilotChatSync-0.1.8-desktop.png`: actual Windows CI screenshot with synthetic data.
 - `SHA256SUMS.txt`: download integrity checksums.
 
 **Upgrade:** close the app, then run the new Setup into the same directory.
@@ -74,7 +89,14 @@ into a new folder to avoid leftover old runtime files.
 
 ## Validation and Limits
 
-Same local 4 x 65 MiB synthetic workload, v0.1.6 vs v0.1.7:
+v0.1.8 local validation: 114 Python tests (three Windows-only skips), frontend
+behavior tests and syntax checks pass. Regressions assert one store scan per
+startup, cache reuse without reparsing, nested overall-step progress, file
+transitions, authenticated polling, complete preflight/apply/refresh continuity,
+failure handling and 100% only on the final response.
+
+Retained performance baseline from v0.1.7, not a new v0.1.8 timing measurement:
+same local 4 x 65 MiB synthetic workload, v0.1.6 vs v0.1.7:
 
 | Operation | Before | After | Peak RSS before / after |
 | --- | --- | --- | --- |
@@ -94,9 +116,9 @@ destination protection, cache integrity errors, staging corruption rollback
 and exact raw backups/restoration. A retained >513 MiB first record passed the
 full handoff at 1056.5 MiB RSS; the cumulative >513 MiB log passed at 31.9 MiB.
 
-Progress checks cover real byte counts, concurrent polling while a preview is
-blocked, authentication, request isolation, failure cleanup, determinate and
-indeterminate UI rendering, and polling timer cleanup. A physical 135,266,484-byte
+Progress checks cover real byte counts, concurrent polling while startup or a
+preview is blocked, authentication, request isolation, failure cleanup,
+monotonic overall UI rendering and polling timer cleanup. Prior physical 135,266,484-byte
 first record passed the complete handoff with reporting enabled at 285.6 MiB
 sampled peak RSS. The full existing platform/packaging gates remain in place.
 

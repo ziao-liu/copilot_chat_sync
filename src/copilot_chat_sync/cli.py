@@ -86,7 +86,7 @@ def _scan(storage: Path) -> dict:
     return {"storage": str(storage), "workspaces": rows, "issues": issues}
 
 
-def _status(config: Config, doctor: bool) -> dict:
+def _status(config: Config, doctor: bool, *, inspect_shared: bool = True) -> dict:
     issues, rows = [], []
     try:
         running = code_processes()
@@ -118,14 +118,15 @@ def _status(config: Config, doctor: bool) -> dict:
             row["scan_error"] = f"Cannot inspect {workspace.directory}: {error}"
             issues.append(row["scan_error"])
     shared = {}
-    try:
-        store = Store(config.store).load()
-        shared = {"sessions": len(store.graphs), "revisions": sum(len(graph) for graph in store.graphs.values()),
-                  "conflicts": sorted(store.conflicts())}
-        if shared["conflicts"]:
-            issues.append("Resolve divergent shared histories before pulling")
-    except SyncError as error:
-        issues.append(str(error))
+    if inspect_shared:
+        try:
+            store = Store(config.store).load()
+            shared = {"sessions": len(store.graphs), "revisions": sum(len(graph) for graph in store.graphs.values()),
+                      "conflicts": sorted(store.conflicts())}
+            if shared["conflicts"]:
+                issues.append("Resolve divergent shared histories before pulling")
+        except SyncError as error:
+            issues.append(str(error))
     backups = list_backups(config)
     if any(entry["status"] in ("prepared", "needs-recovery") for entry in backups):
         issues.append("An interrupted local transaction needs restore; run backups")
@@ -133,6 +134,19 @@ def _status(config: Config, doctor: bool) -> dict:
             "config": str(config.path), "shared_store": str(config.store), "native_workspaces": rows,
             "shared": shared, "code_processes": running, "issues": issues,
             "note": "Counts describe local files only. OneDrive must finish uploading/downloading before a handoff."}
+
+
+def conflict_summary(store: Store) -> list[dict]:
+    conflicts = []
+    for identifier, heads in store.conflicts().items():
+        summaries = []
+        for head in heads:
+            if head.entry is None:
+                raise SyncError("Shared revision has no validated index metadata")
+            summaries.append({"revision": head.revision, "writer": head.writer, "requests": head.request_count,
+                              "last_message_date": head.entry["lastMessageDate"]})
+        conflicts.append({"session": identifier, "heads": summaries})
+    return conflicts
 
 
 def dispatch(args: argparse.Namespace) -> dict:
@@ -203,16 +217,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
         return functions[args.command](config, **options)
     if args.command == "conflicts":
         store = Store(config.store).load()
-        conflicts = []
-        for identifier, heads in store.conflicts().items():
-            summaries = []
-            for head in heads:
-                if head.entry is None:
-                    raise SyncError("Shared revision has no validated index metadata")
-                summaries.append({"revision": head.revision, "writer": head.writer, "requests": head.request_count,
-                                  "last_message_date": head.entry["lastMessageDate"]})
-            conflicts.append({"session": identifier, "heads": summaries})
-        return {"conflicts": conflicts}
+        return {"conflicts": conflict_summary(store)}
     if args.command == "resolve":
         return resolve(config, args.session, args.revision, args.apply)
     if args.command == "backups":

@@ -6,6 +6,8 @@ const path = require("path");
 const vm = require("vm");
 const source = fs.readFileSync(path.join(__dirname, "../src/copilot_chat_sync/web/app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "../src/copilot_chat_sync/web/index.html"), "utf8");
+const css = fs.readFileSync(path.join(__dirname, "../src/copilot_chat_sync/web/style.css"), "utf8");
+assert.match(css, /progress\s*\{[^}]*direction:\s*ltr/);
 
 function harness(snapshot, responses = []) {
     const elements = new Map();
@@ -69,32 +71,68 @@ const ticket = (result = {}, extra = {}) => ({ plan: "verified-ticket", expires_
 
 async function main() {
     let h = harness(base());
-    h.run('dialog("正在检查", progressBody(), []); renderProgress({stage:"读取",file:"<file>",done:1048576,total:2097152,files:2},3)');
-    assert.strictEqual(h.elements.get("operation-progress").value, 1048576);
-    assert.strictEqual(h.elements.get("operation-progress").max, 2097152);
+    h.run('dialog("正在检查", progressBody(), []); renderProgress({overall:.25,stage:"读取",file:"<file>",done:1048576,total:2097152,files:2},3)');
+    assert.strictEqual(h.elements.get("operation-progress").value, .25);
+    assert.strictEqual(h.elements.get("operation-progress").max, 1);
+    assert.strictEqual(h.elements.get("progress-percent").textContent, "25%");
     assert(h.elements.get("progress-detail").textContent.includes("<file>"));
     assert(h.elements.get("progress-detail").textContent.includes("1.0 / 2.0 MiB"));
-    assert(h.elements.get("modal-body").innerHTML.includes("不是整个操作进度"));
-    h.run('renderProgress({stage:"计算校验值",files:2},4)');
-    assert.strictEqual(h.elements.get("operation-progress").value, undefined);
+    assert(h.elements.get("modal-body").innerHTML.includes("整体任务进度"));
+    h.run('renderProgress({overall:.3,stage:"计算校验值",files:2},4)');
+    assert.strictEqual(h.elements.get("operation-progress").value, .3);
+    h.run('renderProgress({overall:.1,stage:"读取下一个文件",done:0,total:1024},5)');
+    assert.strictEqual(h.elements.get("operation-progress").value, .3);
     let finishProgress;
+    let staleProgress = true;
+    let progressFraction = .5;
     h.context.fetch = async (url) => {
-        if (url.startsWith("/api/progress?")) return {ok:true,status:200,json:async () => ({stage:"读取",done:1,total:2})};
+        if (url.startsWith("/api/progress?")) return {ok:true,status:200,json:async () => ({id:staleProgress ? "old" : url.split("?")[1],overall:progressFraction,stage:"读取",done:1,total:2})};
         return new Promise((resolve) => { finishProgress = () => resolve({ok:true,status:200,json:async () => ({done:true})}); });
     };
     const progressRequest = h.run('progressApi("/api/preview", {})');
     assert.strictEqual(h.timers.size, 1);
     const poll = [...h.timers.values()][0];
     await poll();
-    assert.strictEqual(h.elements.get("operation-progress").value, 1);
+    assert.strictEqual(h.elements.get("operation-progress").value, 0);
+    staleProgress = false;
+    await poll();
+    assert.strictEqual(h.elements.get("operation-progress").value, .5);
+    progressFraction = 1;
+    await poll();
+    assert.strictEqual(h.elements.get("operation-progress").value, .999);
+    assert.strictEqual(h.elements.get("progress-percent").textContent, "99%");
     finishProgress();
     await progressRequest;
+    assert.strictEqual(h.elements.get("operation-progress").value, 1);
     assert.strictEqual(h.timers.size, 0);
     await poll();
     assert.strictEqual(h.timers.size, 0);
     h = harness(base(), [{error:"bad chat"}]);
     await assert.rejects(h.run('progressApi("/api/preview", {})'), /bad chat/);
     assert.strictEqual(h.timers.size, 0);
+    h = harness(base());
+    let finishStartup;
+    h.context.fetch = async (url) => {
+        if (url.startsWith("/api/progress?")) return {ok:true,status:200,json:async () => ({id:url.split("?")[1],overall:.375,stage:"检查共享记录",done:3,total:8})};
+        return new Promise((resolve) => { finishStartup = () => resolve({ok:true,status:200,json:async () => base()}); });
+    };
+    const startupRequest = h.run("loadState()");
+    assert.strictEqual(h.elements.get("loading").hidden, false);
+    assert.strictEqual(h.timers.size, 1);
+    await [...h.timers.values()][0]();
+    assert.strictEqual(h.elements.get("startup-progress").value, .375);
+    assert.strictEqual(h.elements.get("startup-percent").textContent, "37%");
+    assert(h.elements.get("startup-stage").textContent.includes("检查共享记录"));
+    finishStartup();
+    await startupRequest;
+    assert.strictEqual(h.elements.get("loading").hidden, true);
+    assert.strictEqual(h.timers.size, 0);
+    assert.strictEqual(h.elements.get("startup-progress").value, 1);
+    h = harness(base(), [{error:"Startup failed"}]);
+    await assert.rejects(h.run("loadState()"), /Startup failed/);
+    assert.strictEqual(h.elements.get("loading").hidden, true);
+    assert.strictEqual(h.timers.size, 0);
+    assert.strictEqual(h.elements.get("startup-progress").value, 0);
     h = harness(base());
     assert.strictEqual(h.run("workspaceLabel(snapshot.workspaces[0])"), "nipie · /home/demo/project");
     assert.strictEqual(h.run("workspaceLabel({uri: 'file:///C:/project'})"), "本机 · /C:/project");
@@ -131,6 +169,46 @@ async function main() {
         assert.strictEqual(h.elements.get("modal").open, false);
         assert(h.elements.get("chat-counts").textContent.includes("非待同步数量"));
         assert.strictEqual(h.run("state.busy"), false);
+    }
+
+    h = harness(base());
+    let finishPhase;
+    const phaseRequests = [];
+    const values = [];
+    h.context.fetch = async (url) => {
+        if (url.startsWith("/api/progress?")) {
+            return {ok:true,status:200,json:async () => ({id:url.split("?")[1],overall:.5,stage:"处理文件",done:0,total:100})};
+        }
+        phaseRequests.push(url.split("?")[0]);
+        return new Promise((resolve) => { finishPhase = (body) => resolve({ok:true,status:200,json:async () => body}); });
+    };
+    const handoffRequest = h.run("handoff('push')");
+    for (const [index, body] of [ticket({would_publish:1}), {published:1}, base()].entries()) {
+        assert.strictEqual(h.timers.size, 1);
+        await [...h.timers.values()][0]();
+        values.push(h.elements.get("operation-progress").value);
+        assert(values[index] < 1, "Reached 100% before the final response");
+        finishPhase(body);
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+    await handoffRequest;
+    assert.deepStrictEqual(phaseRequests, ["/api/preview", "/api/apply", "/api/state"]);
+    assert.deepStrictEqual(values, [.2, .65, .95]);
+    assert.strictEqual(h.elements.get("operation-progress").value, 1);
+    assert.strictEqual(h.elements.get("progress-percent").textContent, "100%");
+    assert.strictEqual(h.elements.get("modal").open, false);
+    assert.strictEqual(h.timers.size, 0);
+
+    for (const responses of [
+        [ticket(), {error:"Apply failed"}],
+        [ticket(), {published:1}, {error:"Refresh failed"}],
+    ]) {
+        h = harness(base(), responses);
+        await h.run("handoff('push')");
+        assert(h.elements.get("operation-progress").value < 1);
+        assert(h.elements.get("progress-stage").textContent.includes("未完成"));
+        assert.strictEqual(h.elements.get("error-banner").hidden, false);
+        assert.strictEqual(h.timers.size, 0);
     }
 
     for (const plan of [

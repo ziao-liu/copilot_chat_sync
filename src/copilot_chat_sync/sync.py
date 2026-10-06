@@ -11,6 +11,7 @@ from typing import Any, Iterator
 
 from .cache import cache_scope, current, signature
 from .index import index_entry, merge_entries, read_keys
+from .progress import report, steps
 from .safety import atomic_copy, atomic_write, atomic_write_chunks, is_redirect, local_lock, plain_path, require_closed
 from .sessions import SyncError, canonical_bytes, canonical_chunks, digest, file_digest, json_loads, load_session, native_document, read_stable
 from .store import REVISION_ID, Store
@@ -75,8 +76,9 @@ def _base(store: Store, state: dict, workspace: Workspace, identifier: str):
 
 
 def push(config: Config, apply: bool = False, selected: list[str] | None = None) -> dict:
-    with operation(config, apply):
+    with operation(config, apply), steps(3) as advance:
         store = Store(config.store).load()
+        advance()
         state = load_state(config)
         sources = [(workspace, workspace.session_files()) for workspace in config.workspaces(selected)]
         for workspace, paths in sources:
@@ -84,33 +86,38 @@ def push(config: Config, apply: bool = False, selected: list[str] | None = None)
                 _base(store, state, workspace, identifier)
         published = 0
         unchanged = 0
-        for workspace, paths in sources:
-            local = state["workspaces"].setdefault(workspace.identifier, {})
-            for identifier, path in paths.items():
-                summary, data = _local(path)
-                content_hash = summary["content_hash"]
-                base = _base(store, state, workspace, identifier)
-                heads = store.heads(identifier)
-                matching = next((head for head in heads if head.content_hash == content_hash), None)
-                if matching is not None:
-                    local[identifier] = matching.revision
-                    unchanged += 1
-                elif base is not None and base.content_hash == content_hash:
-                    unchanged += 1
-                else:
-                    published += 1
-                    if apply:
-                        require_closed()
-                    if data is None:
-                        data = load_session(path)
-                        if digest(data) != content_hash:
-                            raise SyncError(f"Session changed after validation: {path}")
-                    revision = store.publish(data, [base.revision] if base else [], config.device, dry_run=not apply,
-                                             retain_data=False, content_hash=content_hash)
-                    local[identifier] = revision.revision
-                del data
+        with steps(sum(len(paths) for _, paths in sources)) as session_done:
+            for workspace, paths in sources:
+                local = state["workspaces"].setdefault(workspace.identifier, {})
+                for identifier, path in paths.items():
+                    summary, data = _local(path)
+                    content_hash = summary["content_hash"]
+                    base = _base(store, state, workspace, identifier)
+                    heads = store.heads(identifier)
+                    matching = next((head for head in heads if head.content_hash == content_hash), None)
+                    if matching is not None:
+                        local[identifier] = matching.revision
+                        unchanged += 1
+                    elif base is not None and base.content_hash == content_hash:
+                        unchanged += 1
+                    else:
+                        published += 1
+                        if apply:
+                            require_closed()
+                        if data is None:
+                            data = load_session(path)
+                            if digest(data) != content_hash:
+                                raise SyncError(f"Session changed after validation: {path}")
+                        revision = store.publish(data, [base.revision] if base else [], config.device, dry_run=not apply,
+                                                 retain_data=False, content_hash=content_hash)
+                        local[identifier] = revision.revision
+                    del data
+                    session_done()
+        advance()
+        report("保存发送状态" if apply else "完成发送方案", "")
         if apply:
             atomic_write(config.state_path, canonical_bytes(state) + b"\n")
+        advance()
         return {"operation": "push", "applied": apply, "published" if apply else "would_publish": published,
                 "unchanged": unchanged, "conflicts": sorted(store.conflicts()),
                 "note": "This reports the local OneDrive folder, not confirmation of cloud upload."}
@@ -131,41 +138,48 @@ def _update_entries(workspace: Workspace, entries: dict[str, dict[str, Any]], fi
 
 
 def pull(config: Config, apply: bool = False, selected: list[str] | None = None, detach: bool = False) -> dict:
-    with operation(config, apply), TemporaryDirectory(prefix="chat-sync-stage-") as temporary:
+    with operation(config, apply), TemporaryDirectory(prefix="chat-sync-stage-") as temporary, steps(3) as advance:
         store = Store(config.store).load()
+        advance()
         state = load_state(config)
         heads = {identifier: store.chosen(identifier) for identifier in store.graphs}
         updates = []
-        for workspace in config.workspaces(selected):
-            paths = workspace.session_files()
-            files = []
-            imported = {}
-            for identifier, head in heads.items():
-                base = _base(store, state, workspace, identifier)
-                summary = None
-                if identifier in paths:
-                    summary, data = _local(paths[identifier])
-                    del data
-                if summary is not None and summary["content_hash"] != head.content_hash:
-                    if base is None or summary["content_hash"] != base.content_hash:
-                        raise SyncError(f"Unpublished local changes in {workspace.identifier}/{identifier}. Push them first; pull will not overwrite them.")
-                if head.entry is None:
-                    raise SyncError("Shared revision has no validated index metadata")
-                imported[identifier] = head.entry
-                if summary is None or summary["content_hash"] != head.content_hash:
-                    incoming = head.session
-                    path = paths.get(identifier, workspace.chats / (identifier + ".jsonl"))
-                    document = native_document(incoming, path.suffix)
-                    staged = Path(temporary) / f"{workspace.identifier}-{identifier}{path.suffix}"
-                    after_hash = None
-                    if apply:
-                        atomic_write_chunks(staged, canonical_chunks(document, newline=True))
-                        after_hash = file_digest(staged)
-                    files.append(FileUpdate(path, staged if apply else b"", summary["raw_hash"] if summary else None, after_hash))
-                    del incoming, document
-                state["workspaces"].setdefault(workspace.identifier, {})[identifier] = head.revision
-            if imported:
-                updates.append(_update_entries(workspace, imported, files, detach))
+        workspaces = config.workspaces(selected)
+        with steps(len(workspaces) * (len(heads) + 1)) as session_done:
+            for workspace in workspaces:
+                paths = workspace.session_files()
+                files = []
+                imported = {}
+                for identifier, head in heads.items():
+                    base = _base(store, state, workspace, identifier)
+                    summary = None
+                    if identifier in paths:
+                        summary, data = _local(paths[identifier])
+                        del data
+                    if summary is not None and summary["content_hash"] != head.content_hash:
+                        if base is None or summary["content_hash"] != base.content_hash:
+                            raise SyncError(f"Unpublished local changes in {workspace.identifier}/{identifier}. Push them first; pull will not overwrite them.")
+                    if head.entry is None:
+                        raise SyncError("Shared revision has no validated index metadata")
+                    imported[identifier] = head.entry
+                    if summary is None or summary["content_hash"] != head.content_hash:
+                        incoming = head.session
+                        path = paths.get(identifier, workspace.chats / (identifier + ".jsonl"))
+                        document = native_document(incoming, path.suffix)
+                        staged = Path(temporary) / f"{workspace.identifier}-{identifier}{path.suffix}"
+                        after_hash = None
+                        if apply:
+                            atomic_write_chunks(staged, canonical_chunks(document, newline=True))
+                            after_hash = file_digest(staged)
+                        files.append(FileUpdate(path, staged if apply else b"", summary["raw_hash"] if summary else None, after_hash))
+                        del incoming, document
+                    state["workspaces"].setdefault(workspace.identifier, {})[identifier] = head.revision
+                    session_done()
+                if imported:
+                    updates.append(_update_entries(workspace, imported, files, detach))
+                session_done()
+        advance()
+        report("写入聊天、索引与同步状态" if apply else "完成接收方案", "")
         backup = None
         if apply:
             require_closed()
@@ -182,6 +196,7 @@ def pull(config: Config, apply: bool = False, selected: list[str] | None = None,
                         head = heads[file.path.stem]
                         cache.save(file.path, "native", before, raw_hash,
                                    {"content_hash": head.content_hash, "entry": head.entry})
+        advance()
         return {"operation": "pull", "applied": apply, "files": sum(len(update.files) for update in updates),
                 "indexes": sum(update.before != update.after for update in updates),
                 "editing_snapshots_to_quarantine": sum(len(update.detach) for update in updates), "backup": backup}

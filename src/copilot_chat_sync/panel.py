@@ -19,12 +19,12 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .cache import cache_scope
-from .progress import Progress, report
+from .progress import Progress, report, steps
 from .safety import code_processes, is_redirect
 from .sessions import SyncError, canonical_bytes, native_bytes, normalize, session_id
 from .store import REVISION_ID, Store
@@ -210,7 +210,17 @@ class Panel:
         return digest.hexdigest()
 
     def snapshot(self) -> dict:
+        with steps(3) as advance:
+            if self.config_path.exists():
+                Config.load(self.config_path)
+                with cache_scope(self.config_path.with_suffix(".cache.sqlite")):
+                    return self._snapshot(advance)
+            return self._snapshot(advance)
+
+    def _snapshot(self, advance: Callable[[], None]) -> dict:
+        from .cli import _status, conflict_summary
         warnings = []
+        report("读取本机项目与状态")
         try:
             suggested_store = str(default_store())
         except SyncError:
@@ -238,37 +248,48 @@ class Panel:
                 rows[identifier] = {"id": identifier, "uri": uri, "bound": True, "missing": True, "sessions": 0, "linked": False}
         if bindings:
             try:
-                status = self._dispatch(["status"])
+                status = _status(config, False, inspect_shared=False)
                 warnings.extend(status["issues"])
                 for row in status["native_workspaces"]:
                     rows[row["id"]].update(row)
             except SyncError as error:
                 warnings.append(str(error))
         result["workspaces"] = list(rows.values())
+        advance()
         try:
+            report("检查共享聊天版本")
             store = Store(config.store).load()
             result["shared"] = {"sessions": len(store.graphs), "revisions": sum(len(graph) for graph in store.graphs.values()),
                                 "writers": sorted({revision.writer for graph in store.graphs.values() for revision in graph.values()})}
-            result["conflicts"] = self._dispatch(["conflicts"])["conflicts"]
+            result["conflicts"] = conflict_summary(store)
+            if result["conflicts"]:
+                warnings.append("Resolve divergent shared histories before pulling")
         except SyncError as error:
             warnings.append(str(error))
+        advance()
         try:
+            report("读取备份与恢复状态", "")
             result["backups"] = self._dispatch(["backups"])["backups"]
         except (SyncError, ValueError, OSError) as error:
             warnings.append(str(error))
         result["issues"] = list(dict.fromkeys(warnings))
+        advance()
         return result
 
     def preview(self, data: object) -> dict:
         options = _options(data)
         self.plan = None
         try:
-            report("检查文件是否稳定")
-            before = self._stamp(options)
-            result = self._execute(options, False)
-            report("确认预检期间文件未变化")
-            if self._stamp(options) != before:
-                raise PanelError("Files changed during preview. Refresh and preview again.", 409)
+            with steps(3) as advance:
+                report("检查文件是否稳定", "")
+                before = self._stamp(options)
+                advance()
+                result = self._execute(options, False)
+                advance()
+                report("确认预检期间文件未变化", "")
+                if self._stamp(options) != before:
+                    raise PanelError("Files changed during preview. Refresh and preview again.", 409)
+                advance()
         except OSError as error:
             if getattr(error, "winerror", None) == 448:
                 raise PanelError("Windows blocked an untrusted mount point (WinError 448). No changes were applied. Stop old sync/link scripts and back up the original chats. The old link must be replaced with a normal local folder before it can be used; do not disable Windows mount-point protection. " + str(error)) from error
@@ -290,13 +311,17 @@ class Panel:
         if plan["options"].get("detach") and data.get("acknowledge") is not True:
             raise PanelError("Confirm loss of the affected chat undo/checkpoints before quarantine")
         self.plan = None
-        if time.monotonic() > plan["expires"] or self._stamp(plan["options"]) != plan["stamp"]:
-            raise PanelError("Preview expired or files changed. Refresh and preview again.", 409)
-        try:
-            result = self._execute(plan["options"], True)
-        except (SyncError, OSError, ValueError, sqlite3.Error) as error:
-            self.record(plan["options"]["action"], "error", str(error))
-            raise
+        with steps(2) as advance:
+            report("确认预检与当前文件一致", "")
+            if time.monotonic() > plan["expires"] or self._stamp(plan["options"]) != plan["stamp"]:
+                raise PanelError("Preview expired or files changed. Refresh and preview again.", 409)
+            advance()
+            try:
+                result = self._execute(plan["options"], True)
+            except (SyncError, OSError, ValueError, sqlite3.Error) as error:
+                self.record(plan["options"]["action"], "error", str(error))
+                raise
+            advance()
         self.record(plan["options"]["action"], "conflict" if result.get("conflicts") else "complete", result)
         return result
 
@@ -430,7 +455,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                     raise PanelError("Not found", 404)
                 self._reply(200, (ASSETS / asset[0]).read_bytes(), asset[1])
                 return
-            with self.server.panel.exclusive(url.query if write else ""):
+            with self.server.panel.exclusive(url.query if write or url.path == "/api/state" else ""):
                 if write:
                     data = self._body()
                     if url.path == "/api/preview":
@@ -456,7 +481,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                     result = self.server.panel.revision(query["session"][0], query["revision"][0])
                 else:
                     raise PanelError("Not found", 404)
-            self._reply(200, canonical_bytes(result))
+                self._reply(200, canonical_bytes(result))
         except (PanelError, SyncError, OSError, ValueError, sqlite3.Error) as error:
             status = error.status if isinstance(error, PanelError) else 400
             self._reply(status, canonical_bytes({"error": str(error)}))

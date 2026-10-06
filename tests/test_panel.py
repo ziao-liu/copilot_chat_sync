@@ -88,6 +88,7 @@ class PanelTests(unittest.TestCase):
                 status, progress = self.request("/api/progress?123-1")
                 self.assertEqual(status, 200)
                 self.assertTrue(progress["active"])
+                self.assertAlmostEqual(progress["overall"], 1 / 3)
                 self.assertEqual((progress["done"], progress["total"]), (1024, 4096))
                 self.assertEqual(progress["file"], "synthetic.jsonl")
                 self.assertEqual(self.request("/api/progress?123-2")[1], {})
@@ -97,13 +98,59 @@ class PanelTests(unittest.TestCase):
                 worker.join(5)
             self.assertEqual(replies[0][0], 200)
             self.assertFalse(self.request("/api/progress?123-1")[1]["active"])
+            self.assertEqual(self.request("/api/progress?123-1")[1]["overall"], 1)
 
     def test_failed_preview_finishes_progress_and_invalid_id_is_rejected(self):
         with patch.object(self.panel, "_execute", side_effect=SyncError("bad chat")):
             status, _ = self.request("/api/preview?123-2", {"action": "push", "workspaces": [WID]})
         self.assertEqual(status, 400)
         self.assertFalse(self.request("/api/progress?123-2")[1]["active"])
+        progress = self.request("/api/progress?123-2")[1]
+        self.assertFalse(progress["finished"])
+        self.assertLess(progress["overall"], 1)
         self.assertEqual(self.request("/api/preview?invalid", {"action": "push", "workspaces": [WID]})[0], 400)
+
+    def test_startup_state_load_has_live_authenticated_progress(self):
+        started, finish = threading.Event(), threading.Event()
+        replies = []
+
+        def snapshot(advance):
+            advance()
+            report("检查共享聊天版本", "shared.json", 10, 20)
+            started.set()
+            if not finish.wait(5):
+                raise SyncError("Startup test timed out")
+            return {"configured": True}
+
+        with patch.object(self.panel, "_snapshot", side_effect=snapshot):
+            worker = threading.Thread(target=lambda: replies.append(self.request("/api/state?456-1")))
+            worker.start()
+            try:
+                self.assertTrue(started.wait(3))
+                self.assertEqual(self.request("/api/progress?456-1", authenticated=False)[0], 401)
+                status, progress = self.request("/api/progress?456-1")
+                self.assertEqual(status, 200)
+                self.assertTrue(progress["active"])
+                self.assertEqual((progress["done"], progress["total"]), (10, 20))
+            finally:
+                finish.set()
+                worker.join(5)
+            self.assertEqual(replies[0][0], 200)
+            self.assertFalse(self.request("/api/progress?456-1")[1]["active"])
+
+    def test_startup_scans_shared_store_once_and_reuses_verified_metadata(self):
+        store = Store(self.config.store).load()
+        store.publish(normalize(sample("branch A"), SID), [], self.config.device)
+        store.publish(normalize(sample("branch B"), SID), [], self.config.device)
+        original = Store.load
+        with patch.object(Store, "load", autospec=True, side_effect=original) as load:
+            status, snapshot = self.request("/api/state?456-2")
+        self.assertEqual(status, 200)
+        self.assertEqual(load.call_count, 1)
+        self.assertEqual(len(snapshot["conflicts"]), 1)
+        self.assertIn("Resolve divergent shared histories before pulling", snapshot["issues"])
+        with patch("copilot_chat_sync.store.load_json", side_effect=AssertionError("Cached startup reparsed")):
+            self.assertEqual(self.request("/api/state?456-3")[0], 200)
 
     def test_conflict_preview_is_bounded_without_truncating_stored_chat(self):
         data = normalize(sample("x" * 5000), SID)

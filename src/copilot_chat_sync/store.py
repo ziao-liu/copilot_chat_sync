@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from .progress import file_checked, report
+from .progress import file_checked, report, steps
 from .cache import current, signature
 from .index import index_entry
 
@@ -67,16 +67,20 @@ class Store:
                 raise SyncError("Unsupported shared-store format")
             graphs: dict[str, dict[str, Revision]] = {}
             revisions_dir = plain_path(self.root / "revisions", self.root)
+            directories: list[tuple[str, list[Path]]] = []
+            report("列出共享聊天版本")
             if revisions_dir.exists():
                 for directory in sorted(revisions_dir.iterdir()):
                     plain_path(directory, self.root)
                     identifier = session_id(directory.name)
                     if not directory.is_dir():
                         raise SyncError(f"Unexpected store entry: {directory}")
+                    directories.append((identifier, [path for path in sorted(directory.iterdir())
+                                                     if not path.name.startswith(".pending-")]))
+            with steps(sum(len(paths) for _, paths in directories) + 1) as advance:
+                for identifier, paths in directories:
                     graph: dict[str, Revision] = {}
-                    for path in sorted(directory.iterdir()):
-                        if path.name.startswith(".pending-"):
-                            continue
+                    for path in paths:
                         plain_path(path, self.root)
                         if path.suffix != ".json" or not REVISION_ID.fullmatch(path.stem) or not is_regular(path):
                             raise SyncError(f"Unexpected revision/conflict copy: {path}")
@@ -88,6 +92,7 @@ class Store:
                             graph[path.stem] = Revision(path.stem, tuple(saved["parents"]), saved["writer"],
                                                         saved["content_hash"], path=path, entry=saved["entry"], request_count=saved["requests"])
                             file_checked()
+                            advance()
                             continue
                         envelope = load_json(path)
                         if not isinstance(envelope, dict) or set(envelope) != {"schema", "parents", "session", "writer"} or envelope["schema"] != 1:
@@ -112,17 +117,19 @@ class Store:
                                        "writer": envelope["writer"], "content_hash": content_hash, "entry": entry, "requests": len(data["requests"])})
                         del envelope, data
                         file_checked()
+                        advance()
                     for revision in graph.values():
                         missing = set(revision.parents) - graph.keys()
                         if missing:
                             raise SyncError(f"Incomplete OneDrive download for {identifier}; missing parent {sorted(missing)[0]}")
                     if graph:
                         graphs[identifier] = graph
-            self.graphs = graphs
-            report("检查历史版本关系")
-            for identifier in graphs:
-                if not self.heads(identifier):
-                    raise SyncError(f"Revision graph has no head: {identifier}")
+                self.graphs = graphs
+                report("检查历史版本关系")
+                for identifier in graphs:
+                    if not self.heads(identifier):
+                        raise SyncError(f"Revision graph has no head: {identifier}")
+                advance()
             return self
         except (OSError, ValueError, UnicodeError) as error:
             raise SyncError(f"Shared store is unavailable/incomplete at {self.root}: {error}") from error

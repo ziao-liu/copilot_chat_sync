@@ -17,8 +17,10 @@ h1 { font-size: 26px; margin: 0; }
 h2 { font-size: 18px; margin: 0 0 12px; }
 header p { margin: 4px 0 0; color: #637187; }
 p { margin: 12px 0; }
-progress { width: 100%; height: 18px; accent-color: #245bce; }
-#progress-detail { overflow-wrap: anywhere; }
+progress { display: block; width: 100%; height: 18px; direction: ltr; accent-color: #245bce; }
+.progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 8px; }
+.progress-heading strong { font-variant-numeric: tabular-nums; }
+#progress-detail, #startup-detail { overflow-wrap: anywhere; }
 button, input, select { font: inherit; }
 button {
     border: 1px solid #c7d0dc; border-radius: 8px; background: white;
